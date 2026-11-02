@@ -19,25 +19,33 @@ MAX_CONCURRENT = threading.Semaphore(int(os.environ.get("YTMP34_MAX", "3")))
 
 # live stats for dev mode, memory only
 stats_lock = threading.Lock()
-visitors = {}  # random tab id -> last ping
+last_active = {}  # random tab id -> last time the person did something
+busy = {}  # tab id -> downloads running
 converting = 0
 
 
-def stats(visitor=""):
+def stats(tab="", active=False):
     now = time.time()
     with stats_lock:
-        if visitor:
-            visitors[visitor[:32]] = now
-        for v, seen in list(visitors.items()):
-            if now - seen > 75:
-                del visitors[v]
-        return {"visitors": len(visitors), "converting": converting}
+        if tab and active:
+            last_active[tab] = now
+        for v, seen in list(last_active.items()):
+            if now - seen > 60:
+                del last_active[v]
+        users = {v for v, seen in last_active.items() if now - seen <= 5} | set(busy)
+        anonymous = converting - sum(busy.values())  # bookmark downloads have no tab id
+        return {"active": len(users) + anonymous, "converting": converting}
 
 
-def count_converting(n):
+def count_converting(n, tab=""):
     global converting
     with stats_lock:
         converting += n
+        if tab:
+            busy[tab] = busy.get(tab, 0) + n
+            if not busy[tab]:
+                del busy[tab]
+
 
 # tags + thumbnail as cover art
 TAGS_AND_COVER = [
@@ -170,7 +178,7 @@ class Handler(BaseHTTPRequestHandler):
         q = dict(urllib.parse.parse_qsl(u.query))
         self.direct = q.get("direct") == "1"
         if u.path == "/ping":
-            return self.json(200, {"ok": True, "yt_dlp": yt_dlp.version.__version__, **stats(q.get("v", ""))})
+            return self.json(200, {"ok": True, "yt_dlp": yt_dlp.version.__version__, **stats(q.get("v", "")[:32], q.get("a") == "1")})
         if u.path != "/dl":
             return self.fail(404, {"error": "not found"})
 
@@ -179,7 +187,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.fail(400, {"error": "bad url or format"})
 
         workdir = tempfile.mkdtemp(prefix="ytmp34-")
-        count_converting(1)
+        tab = q.get("v", "")[:32]
+        count_converting(1, tab)
         try:
             with MAX_CONCURRENT:
                 path = download(url, fmt, workdir)
@@ -205,7 +214,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
         finally:
-            count_converting(-1)
+            count_converting(-1, tab)
             shutil.rmtree(workdir, ignore_errors=True)
 
     def log_message(self, fmt, *args):

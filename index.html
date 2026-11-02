@@ -190,18 +190,30 @@ function bar(mode, pct) {
 }
 function offline(down) { $("offline").hidden = !down; }
 
-async function ping() {
+async function ping(active = false) {
   let info = null;
   try {
-    const r = await fetch(SERVER + "/ping?v=" + tab, { signal: AbortSignal.timeout(5000) });
+    const r = await fetch(SERVER + "/ping?v=" + tab + (active ? "&a=1" : ""), { signal: AbortSignal.timeout(5000) });
     if (r.ok) info = await r.json();
   } catch {}
   $("dot").textContent = info ? "● online" : "● offline";
   $("dot").style.color = info ? "var(--ok)" : "var(--acc)";
-  $("counts").textContent = info ? "· " + info.visitors + " on the site · " + info.converting + " converting" : "";
+  $("counts").textContent = info ? "· " + info.active + " using ytmp34 right now · " + info.converting + " converting" : "";
   offline(!info);
 }
-setInterval(() => { if (document.visibilityState === "visible") ping(); }, 20000);
+// status check every 20s, every 3s in dev mode
+let ticks = 0;
+setInterval(() => {
+  if (document.visibilityState === "visible" && (!$("dev").hidden || ++ticks % 7 === 0)) ping();
+}, 3000);
+
+// tell the server someone's actually doing something (at most every 3s)
+let lastActive = 0;
+["pointermove", "pointerdown", "keydown", "scroll", "touchstart"].forEach(ev => addEventListener(ev, () => {
+  if (Date.now() - lastActive < 3000) return;
+  lastActive = Date.now();
+  ping(true);
+}, { passive: true }));
 
 const ytId = s => (s.match(/(?:youtu\.be\/|v=|shorts\/|embed\/|live\/)([\w-]{11})/) || [])[1];
 
@@ -211,7 +223,7 @@ async function go(fmt) {
   const btns = [$("mp3"), $("mp4")]; btns.forEach(b => b.disabled = true);
   status(fmt === "mp3" ? "Grabbing audio…" : "Grabbing video…"); bar("busy");
   try {
-    const r = await fetch(SERVER + ("/dl?fmt=" + fmt + "&url=" + encodeURIComponent(raw)));
+    const r = await fetch(SERVER + "/dl?v=" + tab + "&fmt=" + fmt + "&url=" + encodeURIComponent(raw));
     if (!r.ok) {
       const body = await r.json().catch(() => ({}));
       throw Object.assign(new Error(body.error || "HTTP " + r.status), { code: body.code });
@@ -274,6 +286,8 @@ const os = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.max
   : /Android/.test(ua) ? "android" : "desktop";
 document.querySelectorAll("[data-os]").forEach(el => el.hidden = el.dataset.os !== os);
 if (/Mac/.test(navigator.platform)) $("barkeys").textContent = "⌘ + Shift + B";
+// already installed as an app, nothing to set up
+if (navigator.standalone || matchMedia("(display-mode: standalone)").matches) $("shortcuts").hidden = true;
 
 // arrow from the bookmark buttons up to the bookmarks bar
 function arrow() {
