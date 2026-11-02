@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# Final ytmp34 setup step on an Oracle Ubuntu VM that already has ~/ytmp34/{venv,server.py,key,cookies.txt}.
-# Adds the ytmp34 service + nightly yt-dlp update, opens ports 80/443 in the VM firewall, and puts
-# Caddy (free HTTPS via <ip>.sslip.io) in front. Does not touch anything else on the machine.
-#   ssh -i ~/Downloads/ssh-key-2026-10-22.key ubuntu@<ip> 'bash -s' < setup-oracle.sh
+# ssh ubuntu@<ip> 'bash -s' < setup-oracle.sh
 set -euo pipefail
 
 D=$HOME/ytmp34
@@ -31,7 +28,7 @@ RestartSec=5
 WantedBy=multi-user.target
 UNIT
 
-# YouTube changes often; restart nightly so yt-dlp updates itself (ExecStartPre).
+# update yt-dlp every night
 sudo tee /etc/systemd/system/ytmp34-update.service >/dev/null <<UNIT
 [Service]
 Type=oneshot
@@ -48,7 +45,7 @@ UNIT
 sudo systemctl daemon-reload
 sudo systemctl enable --now ytmp34 ytmp34-update.timer
 
-# Oracle's Ubuntu images reject everything but SSH; allow 80/443 just before that REJECT rule.
+# open 80/443
 REJ=$(sudo iptables -S INPUT | grep -n -- '-j REJECT' | head -1 | cut -d: -f1)
 for p in 443 80; do
   sudo iptables -C INPUT -p tcp -m state --state NEW -m tcp --dport $p -j ACCEPT 2>/dev/null ||

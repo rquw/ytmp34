@@ -1,13 +1,5 @@
-"""ytmp34 server: tiny yt-dlp backend for rquw.github.io/ytmp34.
-
-Runs the same on a Windows PC or a Raspberry Pi. Needs Python 3.9+, yt-dlp, ffmpeg.
-
-    python server.py                      # local only, http://127.0.0.1:8765
-    python server.py --host 0.0.0.0       # reachable on your network (e.g. on a Pi)
-    YTMP34_KEY=secret python server.py    # require ?key=secret (use when exposing it publicly)
-    YTMP34_COOKIES=cookies.txt ...        # YouTube cookies (needed on cloud servers YouTube calls bots)
-    YTMP34_MAX=1 ...                      # parallel downloads (default 3; use 1 on a 1 GB machine)
-"""
+# ytmp34 server (yt-dlp + ffmpeg)
+# env: YTMP34_KEY, YTMP34_COOKIES, YTMP34_MAX
 import argparse
 import html
 import json
@@ -25,8 +17,7 @@ KEY = os.environ.get("YTMP34_KEY", "")
 COOKIES = os.environ.get("YTMP34_COOKIES", "")
 MAX_CONCURRENT = threading.Semaphore(int(os.environ.get("YTMP34_MAX", "3")))
 
-# Title/artist tags + the video thumbnail as cover art, so files look right in music apps.
-# YouTube thumbnails are WebP, which MP3/MP4 cover art can't hold, so convert to JPEG first.
+# tags + thumbnail as cover art
 TAGS_AND_COVER = [
     {"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"},
     {"key": "FFmpegMetadata"},
@@ -42,14 +33,13 @@ FORMATS = {
         ],
     },
     "mp4": {
-        # H.264 + AAC plays everywhere (Windows, phones, editors); capped at 1080p for speed.
+        # h264/aac, max 1080p
         "format": "bv*[height<=1080][vcodec^=avc1]+ba[ext=m4a]/b[ext=mp4][height<=1080]/bv*[height<=1080]+ba/b",
         "merge_output_format": "mp4",
         "postprocessors": TAGS_AND_COVER,
     },
 }
 
-# yt-dlp error text -> (code, message the site shows). First match wins.
 ERRORS = [
     (("confirm you", "not a bot"), "cookies",
      "YouTube is blocking the server: its cookies have expired. Export fresh ones (see the README)."),
@@ -121,7 +111,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def fail(self, code, body):
-        # Direct links (the MP3/MP4 bookmarks) are opened by the browser itself, so show a page, not JSON.
+        # bookmarks open this directly, so show a page instead of json
         if not self.direct:
             return self.json(code, body)
         data = ERROR_PAGE.format(html.escape(body["error"])).encode()

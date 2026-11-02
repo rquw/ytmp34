@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# ytmp34 server installer for Raspberry Pi OS / Debian.
-#   curl -fsSL https://raw.githubusercontent.com/rquw/ytmp34/main/install-pi.sh | bash
-# Re-running is safe: it updates the code and keeps your key.
+# curl -fsSL https://raw.githubusercontent.com/rquw/ytmp34/main/install-pi.sh | bash
 set -euo pipefail
 
 DIR="$HOME/ytmp34"
@@ -17,7 +15,6 @@ curl -fsSL "$RAW/server.py" -o "$DIR/server.py"
 [ -d "$DIR/venv" ] || python3 -m venv "$DIR/venv"
 "$DIR/venv/bin/pip" install -q -U pip yt-dlp
 
-# Secret key so only you can use your Pi (kept across re-installs).
 [ -f "$DIR/key" ] || head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' > "$DIR/key"
 KEY="$(cat "$DIR/key")"
 
@@ -40,7 +37,7 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-# YouTube changes often; restart nightly so yt-dlp updates itself (ExecStartPre).
+# update yt-dlp every night
 sudo tee /etc/systemd/system/ytmp34-update.service >/dev/null <<EOF
 [Service]
 Type=oneshot

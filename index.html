@@ -17,7 +17,8 @@
   * { box-sizing:border-box; }
   body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--fg);
          font:16px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; padding:16px; }
-  main { width:100%; max-width:560px; }
+  .wrap { width:100%; max-width:880px; display:flex; gap:56px; align-items:flex-start; }
+  main { flex:1; min-width:0; max-width:560px; }
   h1 { font-size:28px; margin:0 0 20px; letter-spacing:-.02em; }
   h1 span { color:var(--acc); }
   input { width:100%; padding:14px 16px; font:inherit; color:inherit; background:transparent;
@@ -27,11 +28,6 @@
   .field input { padding-right:84px; }
   #paste { position:absolute; right:6px; top:6px; bottom:6px; flex:none; padding:0 14px; font-size:14px;
            background:var(--line); color:var(--fg); }
-  #status a { color:inherit; }
-  .tools { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; margin-top:10px; }
-  .tools a, .tools button { flex:none; padding:6px 12px; font:600 13px system-ui, sans-serif; border-radius:8px;
-           background:var(--line); color:var(--fg); text-decoration:none; }
-  #install[hidden] { display:none; }
   .row { display:flex; gap:10px; margin-top:10px; }
   button { flex:1; padding:14px; font:600 16px system-ui, sans-serif; border:0; border-radius:10px; cursor:pointer;
            background:var(--acc); color:#fff; }
@@ -39,17 +35,37 @@
   button:disabled { opacity:.5; cursor:default; }
   #status { min-height:24px; margin-top:14px; color:var(--mut); font-size:14px; word-break:break-word; }
   #status.err { color:var(--acc); } #status.ok { color:var(--ok); }
+  #status a { color:inherit; }
   .bar { height:3px; background:var(--line); border-radius:2px; overflow:hidden; margin-top:10px; visibility:hidden; }
   .bar i { display:block; height:100%; width:0; background:var(--acc); transition:width .2s; }
   .bar.busy i { width:30%; animation:slide 1.1s infinite ease-in-out; }
   @keyframes slide { from { transform:translateX(-100%); } to { transform:translateX(340%); } }
+  #offline { margin-top:14px; padding:14px 16px; border:1px solid var(--acc); border-radius:10px; font-size:14px; }
+  #offline b { display:block; color:var(--acc); letter-spacing:.08em; margin-bottom:4px; }
+  #offline a { color:inherit; }
   details { margin-top:28px; color:var(--mut); font-size:14px; }
-  details input { padding:10px 12px; margin-top:8px; font-size:14px; }
   summary { cursor:pointer; }
-  code { background:var(--line); padding:1px 5px; border-radius:4px; }
+  .tools { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; margin-top:10px; }
+  .tools a, .tools button { flex:none; padding:6px 12px; font:600 13px system-ui, sans-serif; border-radius:8px;
+           background:var(--line); color:var(--fg); text-decoration:none; }
+  #install[hidden] { display:none; }
+  #dev { margin-top:28px; padding-top:16px; border-top:1px dashed var(--line); color:var(--mut); font-size:14px; }
+  #dev input { padding:10px 12px; margin-top:8px; font-size:14px; }
+  #dev a { color:inherit; }
+  aside { width:240px; flex:none; padding-top:6px; color:var(--mut); font-size:14px; }
+  aside h2 { font-size:14px; margin:0 0 12px; color:var(--fg); }
+  aside ul { list-style:none; margin:0; padding:0; }
+  aside li { margin-bottom:14px; }
+  aside li b { display:block; color:var(--fg); font-weight:600; }
+  @media (max-width: 860px) {
+    .wrap { flex-direction:column; gap:36px; align-items:stretch; }
+    main { max-width:none; }
+    aside { width:auto; border-top:1px solid var(--line); padding-top:20px; }
+  }
 </style>
 </head>
 <body>
+<div class="wrap">
 <main>
   <h1>yt<span>mp34</span></h1>
   <div class="field">
@@ -63,6 +79,12 @@
   <div class="bar" id="bar"><i></i></div>
   <div id="status"></div>
 
+  <div id="offline" hidden>
+    <b>OFFLINE</b>
+    I'm so sorry, but the server is currently down. Chances are I'm working on it right now.
+    Please send an E-Mail to <a href="mailto:rquw@icloud.com">rquw@icloud.com</a> if you see this!
+  </div>
+
   <details id="shortcuts">
     <summary>Shortcuts</summary>
     <div class="tools">
@@ -71,27 +93,37 @@
       <a class="bookmarklet" data-fmt="mp4" href="#" title="Drag me to your bookmarks bar">🎬 MP4</a>
     </div>
     <p>Drag <b>🎵 MP3</b> and <b>🎬 MP4</b> to your bookmarks bar. Click one while watching a YouTube video and the
-       file downloads right there, without opening this site (the tab shows a spinner while the server works). They
-       contain your key, so don't share them.
+       file downloads right there, without opening this site. They contain your key, so don't share them.
        On a phone, add this site to your home screen (iPhone: Share → Add to Home Screen). On Android the installed
        app also shows up in YouTube's Share menu.</p>
   </details>
 
-  <details id="settings">
-    <summary>Server <span id="dot">·</span></summary>
+  <div id="dev" hidden>
+    Server <span id="dot">·</span>
     <input id="server" placeholder="https://your-server.sslip.io">
     <input id="key" placeholder="Key">
-    <p>Downloads run on your own server (yt-dlp). Easiest: open the setup link with the server address and key.
-       <a href="https://github.com/rquw/ytmp34#readme" style="color:inherit">Setup guide</a>.</p>
-  </details>
+    <p><a href="https://github.com/rquw/ytmp34#readme">Setup guide</a></p>
+  </div>
 </main>
+
+<aside>
+  <h2>Changelog</h2>
+  <ul>
+    <li><b>v1.3</b>One-click 🎵 MP3 / 🎬 MP4 bookmarks. Changelog.</li>
+    <li><b>v1.2</b>Cover art and tags on every download, paste button, install as an app, clearer errors.</li>
+    <li><b>v1.1</b>New server, about twice as fast.</li>
+    <li><b>v1.0</b>First version.</li>
+  </ul>
+</aside>
+</div>
 <script>
 const $ = id => document.getElementById(id);
 const store = {
   get: k => { try { return localStorage.getItem(k) || ""; } catch { return ""; } },
   set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
 };
-// Setup link from install-pi.sh: #s=<server>&k=<key>, saved once, then removed from the address bar.
+
+// setup link: #s=<server>&k=<key>
 const setup = new URLSearchParams(location.hash.slice(1));
 if (setup.get("s")) {
   store.set("server", setup.get("s")); store.set("key", setup.get("k") || "");
@@ -100,8 +132,18 @@ if (setup.get("s")) {
 $("server").value = store.get("server");
 $("key").value = store.get("key");
 const server = () => $("server").value.trim().replace(/\/+$/, "");
-if (!server()) $("settings").open = true;
 const withKey = q => { const k = $("key").value.trim(); return k ? q + "&key=" + encodeURIComponent(k) : q; };
+
+// K = dev mode
+$("dev").hidden = store.get("dev") !== "1";
+addEventListener("keydown", e => {
+  const t = e.target;
+  if (e.key.toLowerCase() !== "k" || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (t.matches("input, textarea") && (t.id !== "url" || t.value)) return;
+  e.preventDefault();
+  $("dev").hidden = !$("dev").hidden;
+  store.set("dev", $("dev").hidden ? "" : "1");
+});
 
 function status(msg, cls = "") { $("status").textContent = msg; $("status").className = cls; }
 function bar(mode, pct) {
@@ -109,14 +151,20 @@ function bar(mode, pct) {
   b.classList.toggle("busy", mode === "busy");
   b.firstElementChild.style.width = mode === "pct" ? pct + "%" : "";
 }
+function offline(down) { $("offline").hidden = !down; }
 
 async function ping() {
-  if (!server()) { $("dot").textContent = "● not set up"; $("dot").style.color = "var(--acc)"; return false; }
-  try {
-    const r = await fetch(server() + withKey("/ping?"), { signal: AbortSignal.timeout(3000) });
-    const ok = r.ok; $("dot").textContent = ok ? "● online" : "● " + (await r.json()).error;
-    $("dot").style.color = ok ? "var(--ok)" : "var(--acc)"; return ok;
-  } catch { $("dot").textContent = "● offline"; $("dot").style.color = "var(--acc)"; return false; }
+  let ok = false, label = "not set up";
+  if (server()) {
+    try {
+      const r = await fetch(server() + withKey("/ping?"), { signal: AbortSignal.timeout(5000) });
+      ok = r.ok; label = ok ? "online" : (await r.json()).error;
+    } catch { label = "offline"; }
+  }
+  $("dot").textContent = "● " + label;
+  $("dot").style.color = ok ? "var(--ok)" : "var(--acc)";
+  offline(!ok);
+  return ok;
 }
 ["server", "key"].forEach(id => $(id).addEventListener("change", () => { store.set(id, $(id).value.trim()); ping(); }));
 
@@ -125,7 +173,7 @@ const ytId = s => (s.match(/(?:youtu\.be\/|v=|shorts\/|embed\/|live\/)([\w-]{11}
 async function go(fmt) {
   const raw = $("url").value.trim();
   if (!ytId(raw) && !/^https?:\/\//.test(raw)) return status("Paste a YouTube link first.", "err");
-  if (!server()) { $("settings").open = true; return status("Open your setup link first.", "err"); }
+  if (!server()) return offline(true);
   const btns = [$("mp3"), $("mp4")]; btns.forEach(b => b.disabled = true);
   status(fmt === "mp3" ? "Grabbing audio…" : "Grabbing video…"); bar("busy");
   try {
@@ -134,6 +182,7 @@ async function go(fmt) {
       const body = await r.json().catch(() => ({}));
       throw Object.assign(new Error(body.error || "HTTP " + r.status), { code: body.code || (r.status === 401 && "key") });
     }
+    offline(false);
     const total = +r.headers.get("Content-Length") || 0, reader = r.body.getReader(), parts = [];
     let got = 0;
     for (;;) {
@@ -148,12 +197,8 @@ async function go(fmt) {
     a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 30000);
     status("Done: " + name, "ok");
   } catch (e) {
-    if (e instanceof TypeError) {
-      status("Can't reach your server at " + server() + ". Is it running?", "err");
-      $("settings").open = true;
-    } else if (e.code === "key") {
-      status("The server rejected the key. Open your setup link again.", "err");
-      $("settings").open = true;
+    if (e instanceof TypeError || e.code === "key") {
+      status(""); offline(true);
     } else {
       status(e.message, "err");
       if (e.code === "cookies") {
@@ -168,7 +213,7 @@ $("mp3").onclick = () => go("mp3");
 $("mp4").onclick = () => go("mp4");
 $("url").addEventListener("keydown", e => { if (e.key === "Enter") go(e.shiftKey ? "mp4" : "mp3"); });
 
-// A link handed to the page: ?url= (bookmarklet) or ?text=/?title= (Android share sheet, link inside the text).
+// links from the bookmarks (?url=) or the android share menu (?text=)
 const q = new URLSearchParams(location.search);
 const shared = [q.get("url"), q.get("text"), q.get("title")].map(s => (s || "").match(/https?:\/\/\S+/)).find(Boolean);
 if (shared) { $("url").value = shared[0]; history.replaceState(null, "", location.pathname); status("Link ready. Pick MP3 or MP4."); }
@@ -184,7 +229,6 @@ if (navigator.clipboard?.readText) {
   };
 }
 
-// Bookmarks that send the current page straight to the server's direct download (no site in between).
 function bookmarklets() {
   const base = server() + withKey("/dl?direct=1") + "&fmt=";
   document.querySelectorAll(".bookmarklet").forEach(a => {
