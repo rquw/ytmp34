@@ -53,8 +53,10 @@
   .steps img { display:block; width:100%; max-width:300px; height:auto; margin-top:8px; border-radius:12px; }
   .steps img.round { width:56px; border-radius:50%; }
   #arrow { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:5; transition:opacity .8s; }
-  #arrow path { fill:none; stroke:var(--acc); stroke-width:3; stroke-linecap:round; stroke-linejoin:round; }
+  #arrow path { fill:none; stroke:var(--acc); stroke-width:4; stroke-linecap:round; stroke-linejoin:round; }
   #arrow .head { opacity:0; transition:opacity .25s; }
+  #arrow .tick { animation:tick .3s .15s both; }
+  @keyframes tick { from { opacity:0; } }
   .tutorial { display:block; width:100%; max-width:420px; height:auto; border-radius:12px; }
   #dev { margin-top:28px; padding-top:16px; border-top:1px dashed var(--line); color:var(--mut); font-size:14px; }
   #changelog { position:fixed; top:16px; right:16px; margin:0; z-index:10; }
@@ -258,24 +260,21 @@ function arrow() {
   $("arrow")?.remove();
   const [b3, b4] = [...document.querySelectorAll(".bookmarklet")].map(a => a.getBoundingClientRect());
   if (!b3?.width) return;
-  const x3 = b3.left + b3.width / 2, x4 = b4.left + b4.width / 2, y = Math.max(b3.bottom, b4.bottom) + 6;
+  const x3 = b3.left + b3.width / 2, x4 = b4.left + b4.width / 2;
+  const top = Math.max(b3.bottom, b4.bottom) + 3, y = top + 10;
   const bez = (p0, p1, p2, p3, t) => (1 - t) ** 3 * p0 + 3 * (1 - t) ** 2 * t * p1 + 3 * (1 - t) * t * t * p2 + t ** 3 * p3;
-  const pts = [];
-  // under mp4, across, up into mp3
-  for (let i = 0; i <= 40; i++) {
-    const t = i / 40;
-    pts.push([bez(x4, x4 + 4, x3 + 16, x3, t), bez(y - 4, y + 12, y + 12, y, t)]);
-  }
-  // out to the left and up to the top, with a loop on the way
-  const tx = Math.max(24, x3 - 170), ty = 6, r = 26, from = 0.42, to = 0.6;
-  const base = t => [bez(x3, x3 - 110, tx - 20, tx, t), bez(y, y + 4, y * 0.5, ty, t)];
-  for (let i = 1; i <= 160; i++) {
-    const t = i / 160;
+  // bracket under both buttons, starting at mp4
+  const pts = [[x4, top], [x4, y], [x3, y]];
+  // long sweep to the top left: flat at first, then steep, with a loop on the bend
+  const tx = Math.min(90, x3 / 3), ty = 4, r = 26, from = 0.5, to = 0.62;
+  const base = t => [bez(x3, tx + (x3 - tx) * 0.3, tx + 10, tx, t), bez(y, y, ty + (y - ty) * 0.3, ty, t)];
+  for (let i = 1; i <= 200; i++) {
+    const t = i / 200;
     let [px, py] = base(t);
     if (t > from && t < to) {
-      // circle in the direction of travel, so it actually loops back on itself
+      // circle in the direction of travel so it really loops, on the outside of the bend
       const [qx, qy] = base(t + 0.001), dl = Math.hypot(qx - px, qy - py);
-      const tX = (qx - px) / dl, tY = (qy - py) / dl, nX = tY, nY = -tX;
+      const tX = (qx - px) / dl, tY = (qy - py) / dl, nX = -tY, nY = tX;
       const a = (t - from) / (to - from) * Math.PI * 2;
       px += -r * Math.sin(a) * tX + r * (1 - Math.cos(a)) * nX;
       py += -r * Math.sin(a) * tY + r * (1 - Math.cos(a)) * nY;
@@ -283,24 +282,24 @@ function arrow() {
     pts.push([px, py]);
   }
   const d = "M" + pts.map(p => p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" L");
-  const [ex, ey] = pts.at(-1), [px, py] = pts.at(-4);
-  const ang = Math.atan2(ey - py, ex - px), h = 12;
-  const head = [ang - 2.6, ang + 2.6].map(a => `M${ex} ${ey} l${(h * Math.cos(a)).toFixed(1)} ${(h * Math.sin(a)).toFixed(1)}`).join(" ");
+  const [ex, ey] = pts.at(-1), [px, py] = pts.at(-6);
+  const ang = Math.atan2(ey - py, ex - px), h = 22;
+  const head = [ang - 2.65, ang + 2.65].map(a => `M${ex} ${ey} l${(h * Math.cos(a)).toFixed(1)} ${(h * Math.sin(a)).toFixed(1)}`).join(" ");
 
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.id = "arrow";
-  svg.innerHTML = `<path class="line" d="${d}"/><path class="head" d="${head}"/>`;
+  svg.innerHTML = `<path class="line" d="${d}"/><path class="tick" d="M${x3} ${top} V${y}"/><path class="head" d="${head}"/>`;
   document.body.append(svg);
   const line = svg.querySelector(".line"), len = line.getTotalLength();
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   line.style.strokeDasharray = len;
   line.style.strokeDashoffset = still ? 0 : len;
   line.getBoundingClientRect();
-  line.style.transition = "stroke-dashoffset 1.6s cubic-bezier(.6,.05,.3,1)";
+  line.style.transition = "stroke-dashoffset 2s cubic-bezier(.5,.05,.3,1)";
   line.style.strokeDashoffset = 0;
-  setTimeout(() => svg.querySelector(".head").style.opacity = 1, still ? 0 : 1500);
-  setTimeout(() => svg.style.opacity = 0, 6000);
-  setTimeout(() => svg.remove(), 7000);
+  setTimeout(() => svg.querySelector(".head").style.opacity = 1, still ? 0 : 1900);
+  setTimeout(() => svg.style.opacity = 0, 7000);
+  setTimeout(() => svg.remove(), 8000);
 }
 $("shortcuts").addEventListener("toggle", () => {
   if ($("shortcuts").open && os === "desktop") setTimeout(arrow, 30);
