@@ -48,7 +48,11 @@
   .tools { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; margin-top:10px; }
   .tools a, .tools button { flex:none; padding:6px 12px; font:600 13px system-ui, sans-serif; border-radius:8px;
            background:var(--line); color:var(--fg); text-decoration:none; }
-  #install[hidden] { display:none; }
+  #install[hidden], [data-os][hidden] { display:none; }
+  .steps { margin:8px 0 0; padding-left:20px; }
+  .steps li { margin-bottom:16px; padding-left:4px; }
+  .steps img { display:block; width:100%; max-width:300px; height:auto; margin-top:8px; border-radius:12px; }
+  .steps img.round { width:56px; border-radius:50%; }
   #dev { margin-top:28px; padding-top:16px; border-top:1px dashed var(--line); color:var(--mut); font-size:14px; }
   #dev input { padding:10px 12px; margin-top:8px; font-size:14px; }
   #dev a { color:inherit; }
@@ -87,15 +91,36 @@
 
   <details id="shortcuts">
     <summary>Shortcuts</summary>
-    <div class="tools">
-      <button id="install" type="button" hidden>Install app</button>
-      <a class="bookmarklet" data-fmt="mp3" href="#" title="Drag me to your bookmarks bar">🎵 MP3</a>
-      <a class="bookmarklet" data-fmt="mp4" href="#" title="Drag me to your bookmarks bar">🎬 MP4</a>
+    <div data-os="desktop">
+      <div class="tools">
+        <a class="bookmarklet" data-fmt="mp3" href="#" title="Drag me to your bookmarks bar">🎵 MP3</a>
+        <a class="bookmarklet" data-fmt="mp4" href="#" title="Drag me to your bookmarks bar">🎬 MP4</a>
+      </div>
+      <p>Drag <b>🎵 MP3</b> and <b>🎬 MP4</b> to your bookmarks bar. Now you can click them while on any YouTube Video
+         and it instantly starts converting and downloading!</p>
     </div>
-    <p>Drag <b>🎵 MP3</b> and <b>🎬 MP4</b> to your bookmarks bar. Click one while watching a YouTube video and the
-       file downloads right there, without opening this site.
-       On a phone, add this site to your home screen (iPhone: Share → Add to Home Screen). On Android the installed
-       app also shows up in YouTube's Share menu.</p>
+
+    <div data-os="ios">
+      <p>Add this site to your home screen!</p>
+      <ol class="steps">
+        <li>Tap the menu button in the address bar<img src="img/ios-1.jpg" alt="" width="900" height="260"></li>
+        <li>Tap Share<img src="img/ios-2.jpg" alt="" width="709" height="182"></li>
+        <li>Tap the arrow to see more<img class="round" src="img/ios-3.jpg" alt="" width="223" height="223"></li>
+        <li>Tap Add to Home Screen<img src="img/ios-4.jpg" alt="" width="900" height="147"></li>
+      </ol>
+    </div>
+
+    <div data-os="android">
+      <p>Add this site to your home screen!</p>
+      <ol class="steps">
+        <li>In Chrome, tap <b>⋮</b> in the top right corner</li>
+        <li>Tap <b>Add to Home screen</b>, then <b>Install</b></li>
+        <li>Done! You can now also share videos straight from the YouTube app: tap <b>Share</b> under a video and
+            pick <b>ytmp34</b></li>
+      </ol>
+    </div>
+
+    <div class="tools"><button id="install" type="button" hidden>Install app</button></div>
   </details>
 
   <div id="dev" hidden>
@@ -236,6 +261,11 @@ function bookmarklets() {
 }
 ["server", "key"].forEach(id => $(id).addEventListener("change", bookmarklets));
 bookmarklets();
+
+const ua = navigator.userAgent;
+const os = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ? "ios"
+  : /Android/.test(ua) ? "android" : "desktop";
+document.querySelectorAll("[data-os]").forEach(el => el.hidden = el.dataset.os !== os);
 
 let installPrompt;
 addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPrompt = e; $("install").hidden = false; });
