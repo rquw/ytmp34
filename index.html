@@ -5,7 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ytmp34</title>
 <meta name="description" content="YouTube to MP3 / MP4. No ads, no redirects.">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⬇</text></svg>">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0e0e10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ytmp34">
 <style>
   :root { --bg:#0e0e10; --fg:#ececf1; --mut:#8b8b96; --line:#26262c; --acc:#ff3b3b; --ok:#3ecf8e; }
   @media (prefers-color-scheme: light) { :root { --bg:#fafafa; --fg:#111; --mut:#666; --line:#ddd; } }
@@ -18,6 +23,15 @@
   input { width:100%; padding:14px 16px; font:inherit; color:inherit; background:transparent;
           border:1px solid var(--line); border-radius:10px; outline:none; }
   input:focus { border-color:var(--mut); }
+  .field { position:relative; }
+  .field input { padding-right:84px; }
+  #paste { position:absolute; right:6px; top:6px; bottom:6px; flex:none; padding:0 14px; font-size:14px;
+           background:var(--line); color:var(--fg); }
+  #status a { color:inherit; }
+  .tools { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; margin-top:10px; }
+  .tools a, .tools button { flex:none; padding:6px 12px; font:600 13px system-ui, sans-serif; border-radius:8px;
+           background:var(--line); color:var(--fg); text-decoration:none; }
+  #install[hidden] { display:none; }
   .row { display:flex; gap:10px; margin-top:10px; }
   button { flex:1; padding:14px; font:600 16px system-ui, sans-serif; border:0; border-radius:10px; cursor:pointer;
            background:var(--acc); color:#fff; }
@@ -38,7 +52,10 @@
 <body>
 <main>
   <h1>yt<span>mp34</span></h1>
-  <input id="url" type="url" placeholder="Paste a YouTube link" autocomplete="off" autofocus>
+  <div class="field">
+    <input id="url" type="url" placeholder="Paste a YouTube link" autocomplete="off" autofocus>
+    <button id="paste" type="button" hidden>Paste</button>
+  </div>
   <div class="row">
     <button id="mp3">MP3</button>
     <button id="mp4" class="alt">MP4</button>
@@ -46,11 +63,22 @@
   <div class="bar" id="bar"><i></i></div>
   <div id="status"></div>
 
+  <details id="shortcuts">
+    <summary>Shortcuts</summary>
+    <div class="tools">
+      <button id="install" type="button" hidden>Install app</button>
+      <a id="bookmarklet" href="#" title="Drag me to your bookmarks bar">⬇ ytmp34</a>
+    </div>
+    <p>Drag <b>⬇ ytmp34</b> to your bookmarks bar, then click it on any YouTube video to open it here.
+       On a phone, add this site to your home screen (iPhone: Share → Add to Home Screen). On Android the installed
+       app also shows up in YouTube's Share menu.</p>
+  </details>
+
   <details id="settings">
     <summary>Server <span id="dot">·</span></summary>
-    <input id="server" placeholder="https://your-pi.tailXXXX.ts.net">
+    <input id="server" placeholder="https://your-server.sslip.io">
     <input id="key" placeholder="Key">
-    <p>Downloads run on your own Raspberry Pi (yt-dlp). Easiest: open the setup link the Pi installer prints.
+    <p>Downloads run on your own server (yt-dlp). Easiest: open the setup link with the server address and key.
        <a href="https://github.com/rquw/ytmp34#readme" style="color:inherit">Setup guide</a>.</p>
   </details>
 </main>
@@ -94,12 +122,15 @@ const ytId = s => (s.match(/(?:youtu\.be\/|v=|shorts\/|embed\/|live\/)([\w-]{11}
 async function go(fmt) {
   const raw = $("url").value.trim();
   if (!ytId(raw) && !/^https?:\/\//.test(raw)) return status("Paste a YouTube link first.", "err");
-  if (!server()) { $("settings").open = true; return status("Open your setup link from the Pi first.", "err"); }
+  if (!server()) { $("settings").open = true; return status("Open your setup link first.", "err"); }
   const btns = [$("mp3"), $("mp4")]; btns.forEach(b => b.disabled = true);
   status(fmt === "mp3" ? "Grabbing audio…" : "Grabbing video…"); bar("busy");
   try {
     const r = await fetch(server() + withKey("/dl?fmt=" + fmt + "&url=" + encodeURIComponent(raw)));
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "HTTP " + r.status);
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      throw Object.assign(new Error(body.error || "HTTP " + r.status), { code: body.code || (r.status === 401 && "key") });
+    }
     const total = +r.headers.get("Content-Length") || 0, reader = r.body.getReader(), parts = [];
     let got = 0;
     for (;;) {
@@ -114,15 +145,51 @@ async function go(fmt) {
     a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 30000);
     status("Done: " + name, "ok");
   } catch (e) {
-    const offline = e instanceof TypeError;
-    status(offline ? "Can't reach your Pi at " + server() + ". Is it on?" : "Failed: " + e.message, "err");
-    if (offline) $("settings").open = true;
+    if (e instanceof TypeError) {
+      status("Can't reach your server at " + server() + ". Is it running?", "err");
+      $("settings").open = true;
+    } else if (e.code === "key") {
+      status("The server rejected the key. Open your setup link again.", "err");
+      $("settings").open = true;
+    } else {
+      status(e.message, "err");
+      if (e.code === "cookies") {
+        const a = Object.assign(document.createElement("a"),
+          { href: "https://github.com/rquw/ytmp34#current-host-oracle-cloud-always-free", textContent: "How to refresh them", target: "_blank" });
+        $("status").append(" ", a);
+      }
+    }
   } finally { bar(); btns.forEach(b => b.disabled = false); }
 }
 $("mp3").onclick = () => go("mp3");
 $("mp4").onclick = () => go("mp4");
 $("url").addEventListener("keydown", e => { if (e.key === "Enter") go(e.shiftKey ? "mp4" : "mp3"); });
-const shared = new URLSearchParams(location.search).get("url"); if (shared) $("url").value = shared;
+
+// A link handed to the page: ?url= (bookmarklet) or ?text=/?title= (Android share sheet, link inside the text).
+const q = new URLSearchParams(location.search);
+const shared = [q.get("url"), q.get("text"), q.get("title")].map(s => (s || "").match(/https?:\/\/\S+/)).find(Boolean);
+if (shared) { $("url").value = shared[0]; history.replaceState(null, "", location.pathname); status("Link ready. Pick MP3 or MP4."); }
+
+if (navigator.clipboard?.readText) {
+  $("paste").hidden = false;
+  $("paste").onclick = async () => {
+    try {
+      const text = (await navigator.clipboard.readText()).trim();
+      if (!text) return status("Your clipboard is empty.", "err");
+      $("url").value = text; $("url").focus(); status("");
+    } catch { status("Clipboard access was blocked. Long-press the box and paste instead.", "err"); }
+  };
+}
+
+$("bookmarklet").href = "javascript:void(window.open('" + location.origin + location.pathname +
+  "?url='+encodeURIComponent(location.href)))";
+$("bookmarklet").onclick = e => { e.preventDefault(); status("Drag that button to your bookmarks bar instead of clicking it."); };
+
+let installPrompt;
+addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPrompt = e; $("install").hidden = false; });
+$("install").onclick = async () => { await installPrompt?.prompt(); installPrompt = null; $("install").hidden = true; };
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+
 ping();
 </script>
 </body>

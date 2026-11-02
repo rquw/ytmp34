@@ -11,6 +11,7 @@ Runs the same on a Windows PC or a Raspberry Pi. Needs Python 3.9+, yt-dlp, ffmp
 import argparse
 import json
 import os
+import re
 import shutil
 import tempfile
 import threading
@@ -23,20 +24,54 @@ KEY = os.environ.get("YTMP34_KEY", "")
 COOKIES = os.environ.get("YTMP34_COOKIES", "")
 MAX_CONCURRENT = threading.Semaphore(int(os.environ.get("YTMP34_MAX", "3")))
 
+# Title/artist tags + the video thumbnail as cover art, so files look right in music apps.
+# YouTube thumbnails are WebP, which MP3/MP4 cover art can't hold, so convert to JPEG first.
+TAGS_AND_COVER = [
+    {"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"},
+    {"key": "FFmpegMetadata"},
+    {"key": "EmbedThumbnail"},
+]
+
 FORMATS = {
     "mp3": {
         "format": "bestaudio/best",
         "postprocessors": [
             {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"},
-            {"key": "FFmpegMetadata"},
+            *TAGS_AND_COVER,
         ],
     },
     "mp4": {
         # H.264 + AAC plays everywhere (Windows, phones, editors); capped at 1080p for speed.
         "format": "bv*[height<=1080][vcodec^=avc1]+ba[ext=m4a]/b[ext=mp4][height<=1080]/bv*[height<=1080]+ba/b",
         "merge_output_format": "mp4",
+        "postprocessors": TAGS_AND_COVER,
     },
 }
+
+# yt-dlp error text -> (code, message the site shows). First match wins.
+ERRORS = [
+    (("confirm you", "not a bot"), "cookies",
+     "YouTube is blocking the server: its cookies have expired. Export fresh ones (see the README)."),
+    (("private video",), "private", "That video is private."),
+    (("confirm your age", "age-restricted", "inappropriate for some users"), "age",
+     "That video is age-restricted and the server's account can't open it."),
+    (("members-only", "join this channel"), "members", "That video is for channel members only."),
+    (("live event will begin", "premieres in", "is_live", "this live event"), "live",
+     "That's a live stream or premiere that hasn't finished yet. Try again once it's over."),
+    (("not available in your country", "geo restrict"), "geo", "That video isn't available in the server's country."),
+    (("video unavailable", "video is unavailable", "has been removed", "does not exist", "account associated"),
+     "gone", "That video is unavailable or was removed."),
+    (("unsupported url", "is not a valid url", "unable to download webpage"), "url",
+     "That doesn't look like a working video link."),
+]
+
+
+def friendly(msg):
+    low = msg.lower()
+    for needles, code, text in ERRORS:
+        if any(n in low for n in needles):
+            return code, text
+    return "other", re.sub(r"^\[\w+\] [\w-]+: ", "", msg)[:300]
 
 
 def download(url, fmt, workdir):
@@ -47,6 +82,7 @@ def download(url, fmt, workdir):
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
+        "writethumbnail": True,
         "restrictfilenames": False,
         "windowsfilenames": True,
     }
@@ -115,8 +151,10 @@ class Handler(BaseHTTPRequestHandler):
                 shutil.copyfileobj(f, self.wfile, 1 << 20)
         except Exception as e:
             msg = str(e).replace("\x1b[0;31mERROR:\x1b[0m ", "").replace("ERROR: ", "")
+            print("download failed: %s" % msg)
+            code, text = friendly(msg)
             try:
-                self.json(500, {"error": msg[:300]})
+                self.json(500, {"error": text, "code": code})
             except Exception:
                 pass
         finally:
