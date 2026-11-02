@@ -93,7 +93,7 @@
       <a class="bookmarklet" data-fmt="mp4" href="#" title="Drag me to your bookmarks bar">🎬 MP4</a>
     </div>
     <p>Drag <b>🎵 MP3</b> and <b>🎬 MP4</b> to your bookmarks bar. Click one while watching a YouTube video and the
-       file downloads right there, without opening this site. They contain your key, so don't share them.
+       file downloads right there, without opening this site.
        On a phone, add this site to your home screen (iPhone: Share → Add to Home Screen). On Android the installed
        app also shows up in YouTube's Share menu.</p>
   </details>
@@ -109,6 +109,7 @@
 <aside>
   <h2>Changelog</h2>
   <ul>
+    <li><b>v1.4</b>Open to everyone, no setup needed.</li>
     <li><b>v1.3</b>One-click 🎵 MP3 / 🎬 MP4 bookmarks. Changelog.</li>
     <li><b>v1.2</b>Cover art and tags on every download, paste button, install as an app, clearer errors.</li>
     <li><b>v1.1</b>New server, about twice as fast.</li>
@@ -129,7 +130,7 @@ if (setup.get("s")) {
   store.set("server", setup.get("s")); store.set("key", setup.get("k") || "");
   history.replaceState(null, "", location.pathname + location.search);
 }
-$("server").value = store.get("server");
+$("server").value = store.get("server") || "https://132-226-199-122.sslip.io";
 $("key").value = store.get("key");
 const server = () => $("server").value.trim().replace(/\/+$/, "");
 const withKey = q => { const k = $("key").value.trim(); return k ? q + "&key=" + encodeURIComponent(k) : q; };

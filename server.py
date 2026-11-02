@@ -1,5 +1,5 @@
 # ytmp34 server (yt-dlp + ffmpeg)
-# env: YTMP34_KEY, YTMP34_COOKIES, YTMP34_MAX
+# env: YTMP34_COOKIES, YTMP34_MAX
 import argparse
 import html
 import json
@@ -13,7 +13,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import yt_dlp
 
-KEY = os.environ.get("YTMP34_KEY", "")
 COOKIES = os.environ.get("YTMP34_COOKIES", "")
 MAX_CONCURRENT = threading.Semaphore(int(os.environ.get("YTMP34_MAX", "3")))
 
@@ -40,6 +39,8 @@ FORMATS = {
     },
 }
 
+MAX_LENGTH = {"mp3": 2 * 3600, "mp4": 3600}
+
 ERRORS = [
     (("confirm you", "not a bot"), "cookies",
      "YouTube is blocking the server: its cookies have expired. Export fresh ones."),
@@ -49,6 +50,7 @@ ERRORS = [
     (("members-only", "join this channel"), "members", "That video is for channel members only."),
     (("live event will begin", "premieres in", "is_live", "this live event"), "live",
      "That's a live stream or premiere that hasn't finished yet. Try again once it's over."),
+    (("too long",), "long", "That video is too long. MP3 works up to 2 hours, MP4 up to 1 hour."),
     (("not available in your country", "geo restrict"), "geo", "That video isn't available in the server's country."),
     (("video unavailable", "video is unavailable", "has been removed", "does not exist", "account associated"),
      "gone", "That video is unavailable or was removed."),
@@ -74,7 +76,17 @@ def friendly(msg):
 
 
 def download(url, fmt, workdir):
+    rejected = []
+
+    def check(info, *, incomplete=False):
+        if info.get("is_live"):
+            rejected.append("is_live")
+        elif (info.get("duration") or 0) > MAX_LENGTH[fmt]:
+            rejected.append("too long")
+        return rejected[-1] if rejected else None
+
     opts = {
+        "match_filter": check,
         **FORMATS[fmt],
         "outtmpl": os.path.join(workdir, "%(title).150B.%(ext)s"),
         "noplaylist": True,
@@ -89,6 +101,8 @@ def download(url, fmt, workdir):
         opts["cookiefile"] = COOKIES
     with yt_dlp.YoutubeDL(opts) as ydl:
         ydl.download([url])
+    if rejected:
+        raise RuntimeError(rejected[-1])
     files = [f for f in os.listdir(workdir) if f.endswith("." + fmt)]
     if not files:
         raise RuntimeError("no output file produced")
@@ -132,8 +146,6 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         q = dict(urllib.parse.parse_qsl(u.query))
         self.direct = q.get("direct") == "1"
-        if KEY and q.get("key") != KEY:
-            return self.fail(401, {"error": "wrong key"})
         if u.path == "/ping":
             return self.json(200, {"ok": True, "yt_dlp": yt_dlp.version.__version__})
         if u.path != "/dl":
