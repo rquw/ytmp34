@@ -9,6 +9,7 @@ Runs the same on a Windows PC or a Raspberry Pi. Needs Python 3.9+, yt-dlp, ffmp
     YTMP34_MAX=1 ...                      # parallel downloads (default 3; use 1 on a 1 GB machine)
 """
 import argparse
+import html
 import json
 import os
 import re
@@ -66,6 +67,14 @@ ERRORS = [
 ]
 
 
+ERROR_PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ytmp34: download failed</title>
+<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#0e0e10;color:#ececf1;
+font:16px/1.5 system-ui,sans-serif;padding:16px;box-sizing:border-box"><main style="max-width:480px">
+<h1 style="font-size:22px;margin:0 0 12px">Couldn't download that</h1><p style="color:#ff3b3b">{}</p>
+<p><a href="javascript:history.back()" style="color:inherit">&larr; Back to the video</a></p></main>"""
+
+
 def friendly(msg):
     low = msg.lower()
     for needles, code, text in ERRORS:
@@ -111,6 +120,17 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def fail(self, code, body):
+        # Direct links (the MP3/MP4 bookmarks) are opened by the browser itself, so show a page, not JSON.
+        if not self.direct:
+            return self.json(code, body)
+        data = ERROR_PAGE.format(html.escape(body["error"])).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_OPTIONS(self):
         self.send_response(204)
         self.cors()
@@ -121,16 +141,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
         q = dict(urllib.parse.parse_qsl(u.query))
+        self.direct = q.get("direct") == "1"
         if KEY and q.get("key") != KEY:
-            return self.json(401, {"error": "wrong key"})
+            return self.fail(401, {"error": "wrong key"})
         if u.path == "/ping":
             return self.json(200, {"ok": True, "yt_dlp": yt_dlp.version.__version__})
         if u.path != "/dl":
-            return self.json(404, {"error": "not found"})
+            return self.fail(404, {"error": "not found"})
 
         url, fmt = q.get("url", ""), q.get("fmt", "mp3")
         if fmt not in FORMATS or not url.startswith(("http://", "https://")):
-            return self.json(400, {"error": "bad url or format"})
+            return self.fail(400, {"error": "bad url or format"})
 
         workdir = tempfile.mkdtemp(prefix="ytmp34-")
         try:
@@ -154,7 +175,7 @@ class Handler(BaseHTTPRequestHandler):
             print("download failed: %s" % msg)
             code, text = friendly(msg)
             try:
-                self.json(500, {"error": text, "code": code})
+                self.fail(500, {"error": text, "code": code})
             except Exception:
                 pass
         finally:
