@@ -1,0 +1,130 @@
+"""ytmp34 server: tiny yt-dlp backend for rquw.github.io/ytmp34.
+
+Runs the same on a Windows PC or a Raspberry Pi. Needs Python 3.9+, yt-dlp, ffmpeg.
+
+    python server.py                      # local only, http://127.0.0.1:8765
+    python server.py --host 0.0.0.0       # reachable on your network (e.g. on a Pi)
+    YTMP34_KEY=secret python server.py    # require ?key=secret (use when exposing it publicly)
+"""
+import argparse
+import json
+import os
+import shutil
+import tempfile
+import threading
+import urllib.parse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import yt_dlp
+
+KEY = os.environ.get("YTMP34_KEY", "")
+MAX_CONCURRENT = threading.Semaphore(3)
+
+FORMATS = {
+    "mp3": {
+        "format": "bestaudio/best",
+        "postprocessors": [
+            {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"},
+            {"key": "FFmpegMetadata"},
+        ],
+    },
+    "mp4": {
+        # H.264 + AAC plays everywhere (Windows, phones, editors); capped at 1080p for speed.
+        "format": "bv*[height<=1080][vcodec^=avc1]+ba[ext=m4a]/b[ext=mp4][height<=1080]/bv*[height<=1080]+ba/b",
+        "merge_output_format": "mp4",
+    },
+}
+
+
+def download(url, fmt, workdir):
+    opts = {
+        **FORMATS[fmt],
+        "outtmpl": os.path.join(workdir, "%(title).150B.%(ext)s"),
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "restrictfilenames": False,
+        "windowsfilenames": True,
+    }
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        ydl.download([url])
+    files = [f for f in os.listdir(workdir) if f.endswith("." + fmt)]
+    if not files:
+        raise RuntimeError("no output file produced")
+    return os.path.join(workdir, files[0])
+
+
+class Handler(BaseHTTPRequestHandler):
+    def cors(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Private-Network", "true")
+        self.send_header("Access-Control-Expose-Headers", "Content-Disposition, Content-Length")
+
+    def json(self, code, body):
+        data = json.dumps(body).encode()
+        self.send_response(code)
+        self.cors()
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.cors()
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "*")
+        self.end_headers()
+
+    def do_GET(self):
+        u = urllib.parse.urlparse(self.path)
+        q = dict(urllib.parse.parse_qsl(u.query))
+        if KEY and q.get("key") != KEY:
+            return self.json(401, {"error": "wrong key"})
+        if u.path == "/ping":
+            return self.json(200, {"ok": True, "yt_dlp": yt_dlp.version.__version__})
+        if u.path != "/dl":
+            return self.json(404, {"error": "not found"})
+
+        url, fmt = q.get("url", ""), q.get("fmt", "mp3")
+        if fmt not in FORMATS or not url.startswith(("http://", "https://")):
+            return self.json(400, {"error": "bad url or format"})
+
+        workdir = tempfile.mkdtemp(prefix="ytmp34-")
+        try:
+            with MAX_CONCURRENT:
+                path = download(url, fmt, workdir)
+            name = os.path.basename(path)
+            self.send_response(200)
+            self.cors()
+            self.send_header("Content-Type", "audio/mpeg" if fmt == "mp3" else "video/mp4")
+            self.send_header("Content-Length", str(os.path.getsize(path)))
+            self.send_header(
+                "Content-Disposition",
+                "attachment; filename=\"%s\"; filename*=UTF-8''%s"
+                % (name.encode("ascii", "replace").decode().replace('"', "'"), urllib.parse.quote(name)),
+            )
+            self.end_headers()
+            with open(path, "rb") as f:
+                shutil.copyfileobj(f, self.wfile, 1 << 20)
+        except Exception as e:
+            msg = str(e).replace("\x1b[0;31mERROR:\x1b[0m ", "").replace("ERROR: ", "")
+            try:
+                self.json(500, {"error": msg[:300]})
+            except Exception:
+                pass
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+
+    def log_message(self, fmt, *args):
+        print("%s %s" % (self.address_string(), fmt % args))
+
+
+if __name__ == "__main__":
+    p = argparse.ArgumentParser()
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8765)
+    a = p.parse_args()
+    print("ytmp34 server on http://%s:%d  (yt-dlp %s)" % (a.host, a.port, yt_dlp.version.__version__))
+    ThreadingHTTPServer((a.host, a.port), Handler).serve_forever()
