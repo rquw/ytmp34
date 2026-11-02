@@ -52,6 +52,7 @@
   .steps li { margin-bottom:16px; padding-left:4px; }
   .steps img { display:block; width:100%; max-width:300px; height:auto; margin-top:8px; border-radius:12px; }
   .steps img.round { width:56px; border-radius:50%; }
+  .tutorial { display:block; width:100%; max-width:420px; height:auto; border-radius:12px; }
   #dev { margin-top:28px; padding-top:16px; border-top:1px dashed var(--line); color:var(--mut); font-size:14px; }
   #changelog { position:fixed; top:16px; right:16px; margin:0; z-index:10; }
   #changelog summary { list-style:none; padding:8px 14px; border-radius:999px; background:var(--line); color:var(--fg);
@@ -103,6 +104,8 @@
       </div>
       <p>Drag <b>🎵 MP3</b> and <b>🎬 MP4</b> to your bookmarks bar. Now you can click them while on any YouTube Video
          and it instantly starts converting and downloading!</p>
+      <img class="tutorial" src="img/desktop-drag.jpg" alt="" width="1000" height="386">
+      <p>Don't see a bookmarks bar? Press <b id="barkeys">Ctrl + Shift + B</b>.</p>
     </div>
 
     <div data-os="ios">
@@ -230,11 +233,13 @@ if (navigator.clipboard?.readText) {
   };
 }
 
+// the note shows up in chrome's drag preview instead of the code
+const NOTE = "drag-me-to-your-bookmarks-bar!";
 function bookmarklets() {
   const base = SERVER + "/dl?direct=1&fmt=";
   document.querySelectorAll(".bookmarklet").forEach(a => {
-    a.href = "javascript:location.href=" + JSON.stringify(base + a.dataset.fmt + "&url=").replace(/"/g, "'") +
-      "+encodeURIComponent(location.href)";
+    a.href = "javascript:/*" + NOTE + "*/location.href=" + JSON.stringify(base + a.dataset.fmt + "&url=").replace(/"/g, "'") +
+      "+encodeURIComponent(location.href)//" + NOTE;
     a.onclick = e => { e.preventDefault(); status("Drag that button to your bookmarks bar instead of clicking it."); };
   });
 }
@@ -244,6 +249,7 @@ const ua = navigator.userAgent;
 const os = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ? "ios"
   : /Android/.test(ua) ? "android" : "desktop";
 document.querySelectorAll("[data-os]").forEach(el => el.hidden = el.dataset.os !== os);
+if (/Mac/.test(navigator.platform)) $("barkeys").textContent = "⌘ + Shift + B";
 
 let installPrompt;
 addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPrompt = e; $("install").hidden = false; });
