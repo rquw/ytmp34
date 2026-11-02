@@ -233,13 +233,12 @@ if (navigator.clipboard?.readText) {
   };
 }
 
-// the note shows up in chrome's drag preview instead of the code
-const NOTE = "drag-me-to-your-bookmarks-bar!";
+// chrome's drag preview only shows ~14 chars at the end, so the note has to be short
 function bookmarklets() {
   const base = SERVER + "/dl?direct=1&fmt=";
   document.querySelectorAll(".bookmarklet").forEach(a => {
-    a.href = "javascript:/*" + NOTE + "*/location.href=" + JSON.stringify(base + a.dataset.fmt + "&url=").replace(/"/g, "'") +
-      "+encodeURIComponent(location.href)//" + NOTE;
+    a.href = "javascript:location.href=" + JSON.stringify(base + a.dataset.fmt + "&url=").replace(/"/g, "'") +
+      "+encodeURIComponent(location.href)//bookmark-me!";
     a.onclick = e => { e.preventDefault(); status("Drag that button to your bookmarks bar instead of clicking it."); };
   });
 }
