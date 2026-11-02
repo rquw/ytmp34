@@ -5,6 +5,8 @@ Runs the same on a Windows PC or a Raspberry Pi. Needs Python 3.9+, yt-dlp, ffmp
     python server.py                      # local only, http://127.0.0.1:8765
     python server.py --host 0.0.0.0       # reachable on your network (e.g. on a Pi)
     YTMP34_KEY=secret python server.py    # require ?key=secret (use when exposing it publicly)
+    YTMP34_COOKIES=cookies.txt ...        # YouTube cookies (needed on cloud servers YouTube calls bots)
+    YTMP34_MAX=1 ...                      # parallel downloads (default 3; use 1 on a 1 GB machine)
 """
 import argparse
 import json
@@ -18,7 +20,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import yt_dlp
 
 KEY = os.environ.get("YTMP34_KEY", "")
-MAX_CONCURRENT = threading.Semaphore(3)
+COOKIES = os.environ.get("YTMP34_COOKIES", "")
+MAX_CONCURRENT = threading.Semaphore(int(os.environ.get("YTMP34_MAX", "3")))
 
 FORMATS = {
     "mp3": {
@@ -47,6 +50,8 @@ def download(url, fmt, workdir):
         "restrictfilenames": False,
         "windowsfilenames": True,
     }
+    if COOKIES and os.path.exists(COOKIES):
+        opts["cookiefile"] = COOKIES
     with yt_dlp.YoutubeDL(opts) as ydl:
         ydl.download([url])
     files = [f for f in os.listdir(workdir) if f.endswith("." + fmt)]
