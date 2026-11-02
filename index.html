@@ -197,15 +197,10 @@ async function go(fmt) {
     a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 30000);
     status("Done: " + name, "ok");
   } catch (e) {
-    if (e instanceof TypeError || e.code === "key") {
-      status(""); offline(true);
+    if (e instanceof TypeError || e.code === "key" || e.code === "cookies") {
+      status($("dev").hidden ? "" : e.message, "err"); offline(true);
     } else {
       status(e.message, "err");
-      if (e.code === "cookies") {
-        const a = Object.assign(document.createElement("a"),
-          { href: "https://github.com/rquw/ytmp34#current-host-oracle-cloud-always-free", textContent: "How to refresh them", target: "_blank" });
-        $("status").append(" ", a);
-      }
     }
   } finally { bar(); btns.forEach(b => b.disabled = false); }
 }

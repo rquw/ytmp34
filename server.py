@@ -42,7 +42,7 @@ FORMATS = {
 
 ERRORS = [
     (("confirm you", "not a bot"), "cookies",
-     "YouTube is blocking the server: its cookies have expired. Export fresh ones (see the README)."),
+     "YouTube is blocking the server: its cookies have expired. Export fresh ones."),
     (("private video",), "private", "That video is private."),
     (("confirm your age", "age-restricted", "inappropriate for some users"), "age",
      "That video is age-restricted and the server's account can't open it."),
