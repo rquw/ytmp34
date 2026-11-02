@@ -8,6 +8,7 @@ import re
 import shutil
 import tempfile
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -15,6 +16,28 @@ import yt_dlp
 
 COOKIES = os.environ.get("YTMP34_COOKIES", "")
 MAX_CONCURRENT = threading.Semaphore(int(os.environ.get("YTMP34_MAX", "3")))
+
+# live stats for dev mode, memory only
+stats_lock = threading.Lock()
+visitors = {}  # random tab id -> last ping
+converting = 0
+
+
+def stats(visitor=""):
+    now = time.time()
+    with stats_lock:
+        if visitor:
+            visitors[visitor[:32]] = now
+        for v, seen in list(visitors.items()):
+            if now - seen > 75:
+                del visitors[v]
+        return {"visitors": len(visitors), "converting": converting}
+
+
+def count_converting(n):
+    global converting
+    with stats_lock:
+        converting += n
 
 # tags + thumbnail as cover art
 TAGS_AND_COVER = [
@@ -147,7 +170,7 @@ class Handler(BaseHTTPRequestHandler):
         q = dict(urllib.parse.parse_qsl(u.query))
         self.direct = q.get("direct") == "1"
         if u.path == "/ping":
-            return self.json(200, {"ok": True, "yt_dlp": yt_dlp.version.__version__})
+            return self.json(200, {"ok": True, "yt_dlp": yt_dlp.version.__version__, **stats(q.get("v", ""))})
         if u.path != "/dl":
             return self.fail(404, {"error": "not found"})
 
@@ -156,6 +179,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.fail(400, {"error": "bad url or format"})
 
         workdir = tempfile.mkdtemp(prefix="ytmp34-")
+        count_converting(1)
         try:
             with MAX_CONCURRENT:
                 path = download(url, fmt, workdir)
@@ -181,6 +205,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
         finally:
+            count_converting(-1)
             shutil.rmtree(workdir, ignore_errors=True)
 
     def log_message(self, fmt, *args):
