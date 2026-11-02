@@ -66,18 +66,25 @@
   #changelog ul { position:absolute; right:0; top:calc(100% + 8px); width:300px; max-width:calc(100vw - 32px);
                   margin:0; padding:14px 16px 6px 32px; background:var(--bg); border:1px solid var(--line);
                   border-radius:12px; box-shadow:0 8px 30px rgba(0,0,0,.35); }
-  #changelog li { margin-bottom:8px; }
+  #changelog ul { list-style:none; padding-left:16px; }
+  #changelog li { margin-bottom:10px; }
+  #changelog li b { display:inline-block; min-width:38px; color:var(--mut); font-weight:600; }
+  #changelog li.new b { color:var(--acc); }
+  #changelog li.new::after { content:"NEW"; margin-left:6px; padding:1px 6px; border-radius:6px; background:var(--acc);
+                             color:#fff; font:700 10px system-ui, sans-serif; vertical-align:2px; }
+  #changelog.fresh summary { background:var(--acc); color:#fff; animation:pulse 2s infinite; }
+  @keyframes pulse { 50% { box-shadow:0 0 0 6px rgba(255,59,59,.25); } }
 </style>
 </head>
 <body>
 <details id="changelog">
   <summary>Changelog</summary>
   <ul>
-    <li>Clearer bookmark installation guide.</li>
-    <li>One-click bookmarks for MP3 and MP4</li>
-    <li>Cover art and Metadata, paste button, install as an app</li>
-    <li>New server, about twice as fast</li>
-    <li>First version</li>
+    <li data-v="1.4"><b>v1.4</b>Clearer bookmark installation guide.</li>
+    <li data-v="1.3"><b>v1.3</b>One-click bookmarks for MP3 and MP4</li>
+    <li data-v="1.2"><b>v1.2</b>Cover art and Metadata, paste button, install as an app</li>
+    <li data-v="1.1"><b>v1.1</b>New server, about twice as fast</li>
+    <li data-v="1.0"><b>v1.0</b>First version</li>
   </ul>
 </details>
 
@@ -161,6 +168,19 @@ addEventListener("keydown", e => {
 });
 
 addEventListener("click", e => { if (!$("changelog").contains(e.target)) $("changelog").open = false; });
+
+// highlight changelog entries that came out since the last visit
+const ver = v => v.split(".").map(Number).reduce((a, n) => a * 1000 + n, 0);
+const entries = [...document.querySelectorAll("#changelog li")], latest = entries[0].dataset.v;
+const seen = store.get("seen");
+if (!seen) store.set("seen", latest);
+else if (ver(latest) > ver(seen)) {
+  entries.forEach(li => li.classList.toggle("new", ver(li.dataset.v) > ver(seen)));
+  $("changelog").classList.add("fresh");
+}
+$("changelog").addEventListener("toggle", () => {
+  if ($("changelog").open) { $("changelog").classList.remove("fresh"); store.set("seen", latest); }
+});
 
 function status(msg, cls = "") { $("status").textContent = msg; $("status").className = cls; }
 function bar(mode, pct) {
@@ -266,20 +286,21 @@ function arrow() {
   // bracket under both buttons, starting at mp4
   const pts = [[x4, top], [x4, y], [x3, y]];
   // long sweep to the top left: flat at first, then steep, with a loop on the bend
-  const tx = Math.min(90, x3 / 3), ty = 4, r = 26, from = 0.5, to = 0.62;
+  const tx = Math.min(90, x3 / 3), ty = 4, R = 34, loopAt = 110;
   const base = t => [bez(x3, tx + (x3 - tx) * 0.3, tx + 10, tx, t), bez(y, y, ty + (y - ty) * 0.3, ty, t)];
   for (let i = 1; i <= 200; i++) {
-    const t = i / 200;
-    let [px, py] = base(t);
-    if (t > from && t < to) {
-      // circle in the direction of travel so it really loops, on the outside of the bend
-      const [qx, qy] = base(t + 0.001), dl = Math.hypot(qx - px, qy - py);
-      const tX = (qx - px) / dl, tY = (qy - py) / dl, nX = -tY, nY = tX;
-      const a = (t - from) / (to - from) * Math.PI * 2;
-      px += -r * Math.sin(a) * tX + r * (1 - Math.cos(a)) * nX;
-      py += -r * Math.sin(a) * tY + r * (1 - Math.cos(a)) * nY;
-    }
+    const [px, py] = base(i / 200);
     pts.push([px, py]);
+    if (i === loopAt) {
+      // full circle that leaves and comes back to this point, on the inner side of the bend
+      const [qx, qy] = base((i + 1) / 200), dl = Math.hypot(qx - px, qy - py);
+      const tX = (qx - px) / dl, tY = (qy - py) / dl, nX = -tY, nY = tX;
+      for (let k = 1; k <= 60; k++) {
+        const f = k / 60 * Math.PI * 2;
+        pts.push([px + R * nX * (1 - Math.cos(f)) + R * tX * Math.sin(f),
+                  py + R * nY * (1 - Math.cos(f)) + R * tY * Math.sin(f)]);
+      }
+    }
   }
   const d = "M" + pts.map(p => p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" L");
   const [ex, ey] = pts.at(-1), [px, py] = pts.at(-6);
