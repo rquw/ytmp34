@@ -39,6 +39,8 @@
   .bar i { display:block; height:100%; width:0; background:var(--acc); transition:width .2s; }
   .bar.busy i { width:30%; animation:slide 1.1s infinite ease-in-out; }
   @keyframes slide { from { transform:translateX(-100%); } to { transform:translateX(340%); } }
+  #total { margin-top:6px; color:var(--mut); font-size:14px; }
+  #total b { color:var(--fg); }
   #offline { margin-top:14px; padding:14px 16px; border:1px solid var(--acc); border-radius:10px; font-size:14px; }
   #offline b { display:block; color:var(--acc); letter-spacing:.08em; margin-bottom:4px; }
   #offline a { color:inherit; }
@@ -101,6 +103,8 @@
   </div>
   <div class="bar" id="bar"><i></i></div>
   <div id="status"></div>
+
+  <div id="total" hidden></div>
 
   <div id="offline" hidden>
     <b>OFFLINE</b>
@@ -201,6 +205,13 @@ async function ping(active = false) {
   $("dot").style.color = info ? "var(--ok)" : "var(--acc)";
   $("counts").textContent = info ? "· " + info.active + " using ytmp34 right now · " + info.converting + " converting" : "";
   offline(!info);
+  if (info?.videos) {
+    const n = info.videos.toLocaleString("en-US"), mb = Math.round(info.bytes / 1e6).toLocaleString("en-US");
+    $("total").innerHTML = info.videos === 1
+      ? `<b>1</b> video has been converted with ytmp34! That's <b>${mb} MB</b>!`
+      : `<b>${n}</b> videos have been converted with ytmp34! That's <b>${mb} MB</b>!`;
+    $("total").hidden = false;
+  }
 }
 // status check every 20s, every 3s in dev mode
 let ticks = 0;
@@ -265,6 +276,7 @@ async function go(fmt) {
     a.href = URL.createObjectURL(new Blob(parts, { type: r.headers.get("Content-Type") }));
     a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 30000);
     status("Done: " + name, "ok");
+    ping();
   } catch (e) {
     if (e instanceof TypeError || e.code === "cookies") {
       status($("dev").hidden ? "" : e.message, "err"); offline(true);

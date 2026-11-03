@@ -41,6 +41,23 @@ speed = {"mp3": [4.0, 3.0], "mp4": [3.0, 5.0]}  # seconds overhead, seconds per 
 info_cache = {}
 cookies_ok = True
 
+# all-time totals for the counter on the site
+TOTALS = os.path.join(HERE, "totals.json")
+try:
+    with open(TOTALS) as f:
+        totals = json.load(f)
+except (OSError, ValueError):
+    totals = {"videos": 0, "bytes": 0}
+
+
+def count_done(size):
+    with lock:
+        totals["videos"] += 1
+        totals["bytes"] += size
+        with open(TOTALS + ".tmp", "w") as f:
+            json.dump(totals, f)
+        os.replace(TOTALS + ".tmp", TOTALS)
+
 # tags + thumbnail as cover art
 TAGS_AND_COVER = [
     {"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"},
@@ -155,7 +172,7 @@ def stats(tab="", active=False):
         users = {v for v, seen in last_active.items() if now - seen <= 5} | set(busy)
         converting = len(running) + len(waiting)
         anonymous = max(0, converting - sum(busy.values()))  # bookmark downloads have no tab id
-        return {"active": len(users) + anonymous, "converting": converting}
+        return {"active": len(users) + anonymous, "converting": converting, "videos": totals["videos"], "bytes": totals["bytes"]}
 
 
 def mark_busy(tab, n):
@@ -403,6 +420,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             with open(path, "rb") as f:
                 shutil.copyfileobj(f, self.wfile, 1 << 20)
+            count_done(os.path.getsize(path))
         except Exception as e:
             print("download failed: %s" % e)
             code, text = (e.code, e.text) if isinstance(e, Fail) else friendly(str(e))
