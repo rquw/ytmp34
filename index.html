@@ -80,6 +80,7 @@
 <details id="changelog">
   <summary>Changelog</summary>
   <ul>
+    <li data-v="1.5"><b>v1.5</b>Time estimates and a fair queue when it's busy</li>
     <li data-v="1.4"><b>v1.4</b>Clearer bookmark installation guide.</li>
     <li data-v="1.3"><b>v1.3</b>One-click bookmarks for MP3 and MP4</li>
     <li data-v="1.2"><b>v1.2</b>Cover art and Metadata, paste button, install as an app</li>
@@ -217,24 +218,46 @@ let lastActive = 0;
 
 const ytId = s => (s.match(/(?:youtu\.be\/|v=|shorts\/|embed\/|live\/)([\w-]{11})/) || [])[1];
 
+const secs = s => s < 60 ? Math.max(1, Math.round(s)) + " s" : Math.round(s / 60) + " min";
+const short = t => t.length > 60 ? t.slice(0, 57) + "…" : t;
+async function failed(r) {
+  const body = await r.json().catch(() => ({}));
+  return Object.assign(new Error(body.error || "HTTP " + r.status), { code: body.code });
+}
+
 async function go(fmt) {
   const raw = $("url").value.trim();
   if (!ytId(raw) && !/^https?:\/\//.test(raw)) return status("Paste a YouTube link first.", "err");
   const btns = [$("mp3"), $("mp4")]; btns.forEach(b => b.disabled = true);
-  status(fmt === "mp3" ? "Grabbing audio…" : "Grabbing video…"); bar("busy");
+  status("Checking video…"); bar("busy");
+  let timer;
   try {
-    const r = await fetch(SERVER + "/dl?v=" + tab + "&fmt=" + fmt + "&url=" + encodeURIComponent(raw));
-    if (!r.ok) {
-      const body = await r.json().catch(() => ({}));
-      throw Object.assign(new Error(body.error || "HTTP " + r.status), { code: body.code });
-    }
+    const q = "?v=" + tab + "&fmt=" + fmt + "&url=" + encodeURIComponent(raw);
+    const ir = await fetch(SERVER + "/info" + q);
+    if (!ir.ok) throw await failed(ir);
+    const info = await ir.json();
     offline(false);
+
+    // countdown while it waits in line and converts
+    const t0 = Date.now(), all = info.wait + info.estimate;
+    const tick = () => {
+      const el = (Date.now() - t0) / 1000, inLine = info.wait - el, left = all - el;
+      const what = inLine > 0 ? (info.ahead ? info.ahead + " ahead of you · " : "") + "waiting about " + secs(inLine)
+        : left > 1 ? "converting · about " + secs(left) + " left" : "almost done…";
+      status(short(info.title) + " · " + what);
+      bar("pct", Math.min(90, el / Math.max(all, 1) * 90));
+    };
+    tick(); timer = setInterval(tick, 500);
+    const r = await fetch(SERVER + "/dl" + q);
+    clearInterval(timer);
+    if (!r.ok) throw await failed(r);
+
     const total = +r.headers.get("Content-Length") || 0, reader = r.body.getReader(), parts = [];
     let got = 0;
     for (;;) {
       const { done, value } = await reader.read(); if (done) break;
       parts.push(value); got += value.length;
-      if (total) { bar("pct", got / total * 100); status("Saving… " + Math.round(got / total * 100) + "%"); }
+      if (total) { bar("pct", 90 + got / total * 10); status("Saving… " + Math.round(got / total * 100) + "%"); }
     }
     const cd = r.headers.get("Content-Disposition") || "";
     const name = decodeURIComponent((cd.match(/filename\*=UTF-8''([^;]+)/) || [])[1] || "") || "download." + fmt;
@@ -248,7 +271,7 @@ async function go(fmt) {
     } else {
       status(e.message, "err");
     }
-  } finally { bar(); btns.forEach(b => b.disabled = false); }
+  } finally { clearInterval(timer); bar(); btns.forEach(b => b.disabled = false); }
 }
 $("mp3").onclick = () => go("mp3");
 $("mp4").onclick = () => go("mp4");
