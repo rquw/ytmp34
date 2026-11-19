@@ -43,6 +43,7 @@ Wants=network-online.target
 User=$USER
 Environment=YTMP34_MAX=2
 Environment=YTMP34_PROXY=$PI_PROXY
+Environment=YTMP34_PI_STATUS=http://$PROXY_HOST:8780/status
 Environment=PATH=$D/venv/bin:/usr/local/bin:/usr/bin:/bin
 ExecStartPre=-$D/venv/bin/pip install -q -U "yt-dlp[default]" deno
 ExecStart=$D/venv/bin/python $D/server.py --host 127.0.0.1 --port 8765
@@ -88,3 +89,4 @@ for _ in $(seq 60); do curl -fsS http://127.0.0.1:8765/ping >/dev/null 2>&1 && b
 echo
 echo "ytmp34 is at https://$HOST"
 echo "Put that address in index.html (const SERVER) if it changed."
+[ -f "$D/pie" ] || echo "Pie mode: put its password in $D/pie (chmod 600), it is never stored in the repo."

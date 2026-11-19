@@ -101,6 +101,27 @@ sudo systemctl daemon-reload
 sudo systemctl enable -q ytmp34-proxy
 sudo systemctl restart ytmp34-proxy
 
+echo "==> Setting up the status service for pie mode (only reachable over Tailscale)"
+curl -fsSL "$RAW/pi-status.py" -o "$D/pi-status.py"
+sudo tee /etc/systemd/system/pi-status.service >/dev/null <<UNIT
+[Unit]
+Description=pi status for pie mode (tailscale only)
+After=tailscaled.service network-online.target
+Wants=tailscaled.service
+
+[Service]
+User=$USER
+ExecStart=/bin/sh -c "exec /usr/bin/python3 $D/pi-status.py --host \$(tailscale ip -4) --port 8780"
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+sudo systemctl daemon-reload
+sudo systemctl enable -q pi-status
+sudo systemctl restart pi-status
+
 for _ in $(seq 30); do curl -fsS "http://127.0.0.1:$PORT/ping" >/dev/null 2>&1 && break; sleep 2; done
 HOST="$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
 echo

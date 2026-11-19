@@ -176,6 +176,28 @@ addEventListener("keydown", e => {
   ping();
 });
 
+// L ×5 (or tapping the logo 5 times on a phone) = pie mode. the password is checked by the server.
+let pieTaps = [];
+function pieTap() {
+  const now = Date.now();
+  pieTaps = pieTaps.filter(t => now - t < 3000).concat(now);
+  if (pieTaps.length < 5) return;
+  pieTaps = [];
+  if (window.openPie) return openPie();
+  const s = document.createElement("script");
+  s.src = "pie.js?v=" + Date.now();
+  document.head.appendChild(s);
+}
+addEventListener("keydown", e => {
+  if (e.key.toLowerCase() !== "l" || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+  const t = e.target;
+  // the link box has focus on load: L still counts while it's empty (a youtube link never starts with l)
+  if (t.matches("input, textarea") && (t.id !== "url" || t.value)) return;
+  if (t.id === "url") e.preventDefault();
+  pieTap();
+});
+document.querySelector("h1").addEventListener("click", pieTap);
+
 addEventListener("click", e => { if (!$("changelog").contains(e.target)) $("changelog").open = false; });
 
 // highlight changelog entries that came out since the last visit

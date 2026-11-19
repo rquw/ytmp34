@@ -3,11 +3,13 @@
 # phone alerts: put an ntfy.sh topic name in a file called "ntfy" next to this file
 import argparse
 import copy
+import hmac
 import html
 import json
 import os
 import re
 import shutil
+import socket
 import tempfile
 import threading
 import time
@@ -187,6 +189,126 @@ def mark_busy(tab, n):
             del busy[tab]
 
 
+# --- pie mode: a status page for the owner, behind a password ---
+# the password lives only in a file called "pie" next to this file (never in the repo).
+# YTMP34_PI_STATUS: the pi's status url over tailscale, e.g. http://100.x.y.z:8780/status
+
+STARTED = time.time()
+PI_STATUS = os.environ.get("YTMP34_PI_STATUS", "")
+recent = deque(maxlen=10)  # last conversions, memory only
+errors = deque(maxlen=10)
+pie_fails = defaultdict(deque)  # ip -> times of wrong passwords
+pie_all_fails = deque()
+
+
+def pie_check(ip, pw):
+    # 4 digits are easy to guess, so: 5 wrong per ip per 15 min, and 20 wrong in total per hour locks everyone out
+    try:
+        with open(os.path.join(HERE, "pie")) as f:
+            secret = f.read().strip()
+    except OSError:
+        return False, 0
+    now = time.time()
+    with lock:
+        mine = pie_fails[ip]
+        while mine and now - mine[0] > 900:
+            mine.popleft()
+        while pie_all_fails and now - pie_all_fails[0] > 3600:
+            pie_all_fails.popleft()
+        if len(mine) >= 5:
+            return False, int(900 - (now - mine[0]))
+        if len(pie_all_fails) >= 20:
+            return False, int(3600 - (now - pie_all_fails[0]))
+        if secret and hmac.compare_digest(pw.encode(), secret.encode()):
+            return True, 0
+        mine.append(now)
+        pie_all_fails.append(now)
+        return False, 0
+
+
+cpu_now = {"pct": 0.0}
+
+
+def sample_cpu():
+    # cpu use over the last second, measured in the background for pie mode
+    def stat():
+        with open("/proc/stat") as f:
+            v = [int(x) for x in f.readline().split()[1:]]
+        return sum(v), v[3] + v[4]
+    prev = stat()
+    while True:
+        time.sleep(1)
+        cur = stat()
+        dt, di = cur[0] - prev[0], cur[1] - prev[1]
+        cpu_now["pct"] = round(100 * (1 - di / dt), 1) if dt else 0.0
+        prev = cur
+
+
+def machine():
+    mem = {}
+    with open("/proc/meminfo") as f:
+        for line in f:
+            k, _, v = line.partition(":")
+            mem[k] = int(v.split()[0]) * 1024
+    with open("/proc/uptime") as f:
+        uptime = float(f.read().split()[0])
+    disk = shutil.disk_usage("/")
+    return {"uptime": uptime, "load": os.getloadavg(), "cpus": os.cpu_count(), "cpu": cpu_now["pct"],
+            "memory": {"total": mem.get("MemTotal", 0), "available": mem.get("MemAvailable", 0)},
+            "disk": {"total": disk.total, "free": disk.free}}
+
+
+def proxy_ok():
+    if not PROXY:
+        return None
+    host, _, port = PROXY.split("://")[-1].rpartition(":")
+    try:
+        socket.create_connection((host, int(port)), timeout=3).close()
+        return True
+    except OSError:
+        return False
+
+
+pie_seen = {"at": 0, "running": False}
+pie_cache = {"pi": None, "pi_error": "not checked yet", "proxy_ok": None}
+
+
+def pie_poller():
+    # asks the pi every second, but only while someone has pie mode open, so /pie answers instantly
+    # even when the pi is unplugged (no waiting for timeouts)
+    while time.time() - pie_seen["at"] < 30:
+        pi, err = None, None
+        if PI_STATUS:
+            try:
+                with urllib.request.urlopen(PI_STATUS, timeout=3) as r:
+                    pi = json.loads(r.read())
+            except Exception as e:
+                err = str(e)[:200]
+        pie_cache.update(pi=pi, pi_error=err, proxy_ok=proxy_ok())
+        time.sleep(1)
+    with lock:
+        pie_seen["running"] = False
+
+
+def pie_status():
+    with lock:
+        pie_seen["at"] = time.time()
+        start = not pie_seen["running"]
+        pie_seen["running"] = True
+    if start:
+        threading.Thread(target=pie_poller, daemon=True).start()
+        time.sleep(0.8)  # first open: give the pi a moment so the page doesn't start with "offline"
+    pi, pi_error = pie_cache["pi"], pie_cache["pi_error"]
+    with lock:
+        queue = {"running": len(running), "waiting": len(waiting), "slots": SLOTS}
+        rec, errs = list(recent), list(errors)
+    return {"now": time.time(), "oracle": {**machine(), "server_uptime": time.time() - STARTED,
+                                         "yt_dlp": yt_dlp.version.__version__, "youtube_ok": cookies_ok,
+                                         "proxy": bool(PROXY), "proxy_ok": pie_cache["proxy_ok"], "queue": queue,
+                                         "totals": totals, "recent": rec, "errors": errs, **stats()},
+            "pi": pi, "pi_error": pi_error}
+
+
 # --- rate limits and the queue ---
 
 def allowed(ip, kind):
@@ -338,7 +460,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
         self.cors()
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "*")
         self.end_headers()
 
@@ -357,6 +479,19 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/info":
             return self.info(url, fmt)
         self.dl(url, fmt, q.get("v", "")[:32])
+
+    def do_POST(self):
+        self.direct = False
+        if urllib.parse.urlparse(self.path).path != "/pie":
+            return self.json(404, {"error": "not found"})
+        try:
+            pw = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 1000)) or b"{}").get("pw", "")
+        except ValueError:
+            pw = ""
+        ok, wait = pie_check(self.ip(), str(pw))
+        if not ok:
+            return self.json(403, {"error": "wrong" if not wait else "locked", "wait": wait})
+        self.json(200, pie_status())
 
     def lookup(self, url, fmt):
         try:
@@ -433,9 +568,14 @@ class Handler(BaseHTTPRequestHandler):
             with open(path, "rb") as f:
                 shutil.copyfileobj(f, self.wfile, 1 << 20)
             count_done(os.path.getsize(path))
+            with lock:
+                recent.appendleft({"title": info.get("title") or name, "fmt": fmt, "size": os.path.getsize(path),
+                                   "duration": duration, "took": round(time.time() - start, 1), "at": time.time()})
         except Exception as e:
             print("download failed: %s" % e)
             code, text = (e.code, e.text) if isinstance(e, Fail) else friendly(str(e))
+            with lock:
+                errors.appendleft({"code": code, "text": text[:200], "fmt": fmt, "at": time.time()})
             if code == "cookies":
                 cookies_state(False)
             try:
@@ -461,4 +601,5 @@ if __name__ == "__main__":
     a = p.parse_args()
     print("ytmp34 server on http://%s:%d  (yt-dlp %s)" % (a.host, a.port, yt_dlp.version.__version__))
     threading.Thread(target=watch_cookies, daemon=True).start()
+    threading.Thread(target=sample_cpu, daemon=True).start()
     ThreadingHTTPServer((a.host, a.port), Handler).serve_forever()
