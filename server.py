@@ -1,5 +1,5 @@
 # ytmp34 server (yt-dlp + ffmpeg)
-# env: YTMP34_COOKIES, YTMP34_MAX
+# env: YTMP34_COOKIES, YTMP34_MAX, YTMP34_PROXY
 # phone alerts: put an ntfy.sh topic name in a file called "ntfy" next to this file
 import argparse
 import copy
@@ -21,6 +21,9 @@ import yt_dlp
 HERE = os.path.dirname(os.path.abspath(__file__))
 COOKIES = os.environ.get("YTMP34_COOKIES", "")
 SLOTS = int(os.environ.get("YTMP34_MAX", "3"))
+# send youtube traffic through another machine, e.g. a home pi (socks5h://100.x.y.z:1080),
+# so youtube sees a home ip and doesn't ask for cookies
+PROXY = os.environ.get("YTMP34_PROXY", "")
 
 # limits so the server doesn't fall over
 MAX_LENGTH = {"mp3": 2 * 3600, "mp4": 3600}
@@ -245,6 +248,8 @@ def base_opts():
     opts = {"noplaylist": True, "quiet": True, "no_warnings": True, "noprogress": True}
     if COOKIES and os.path.exists(COOKIES):
         opts["cookiefile"] = COOKIES
+    if PROXY:
+        opts["proxy"] = PROXY
     return opts
 
 
