@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# sets up the ytmp34 server on a raspberry pi (64-bit raspberry pi os)
+# sets up a raspberry pi (64-bit raspberry pi os) for ytmp34:
+#  - a proxy that oracle sends its youtube traffic through (see setup-oracle.sh)
+#  - its own ytmp34 server as a slow backup, public through tailscale funnel
 #   curl -fsSL https://raw.githubusercontent.com/rquw/ytmp34/main/install-pi.sh | bash
 # safe to run again: it updates everything and keeps the settings
 set -euo pipefail
@@ -77,8 +79,31 @@ command -v tailscale >/dev/null || curl -fsSL https://tailscale.com/install.sh |
 sudo tailscale status >/dev/null 2>&1 || sudo tailscale up
 sudo tailscale funnel --bg "$PORT"
 
+echo "==> Setting up the proxy for Oracle (only reachable over Tailscale)"
+# oracle converts, but sends its youtube traffic through here so youtube sees a home connection
+sudo apt-get install -y -qq microsocks
+sudo tee /etc/systemd/system/ytmp34-proxy.service >/dev/null <<'UNIT'
+[Unit]
+Description=SOCKS proxy for ytmp34 on Oracle (tailscale only)
+After=tailscaled.service network-online.target
+Wants=tailscaled.service
+
+[Service]
+DynamicUser=yes
+ExecStart=/bin/sh -c "exec /usr/bin/microsocks -i $(tailscale ip -4) -p 1080"
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+sudo systemctl daemon-reload
+sudo systemctl enable -q ytmp34-proxy
+sudo systemctl restart ytmp34-proxy
+
 for _ in $(seq 30); do curl -fsS "http://127.0.0.1:$PORT/ping" >/dev/null 2>&1 && break; sleep 2; done
 HOST="$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
 echo
-echo "ytmp34 is at https://$HOST"
-echo "Put that address in index.html (const SERVER) if it changed."
+echo "ytmp34 (slow backup) is at https://$HOST"
+echo "Proxy for Oracle:          socks5h://$(tailscale ip -4):1080"
+echo "Set up Oracle with:        ssh ubuntu@<oracle-ip> 'PI_PROXY=socks5h://$(tailscale ip -4):1080 bash -s' < setup-oracle.sh"
