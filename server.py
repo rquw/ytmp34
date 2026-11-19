@@ -403,7 +403,14 @@ class Handler(BaseHTTPRequestHandler):
             enqueue(job, estimate(fmt, duration))
             try:
                 start = time.time()
-                path = download(info, fmt, workdir)
+                try:
+                    path = download(info, fmt, workdir)
+                except Exception as e:
+                    # the cached lookup's video links can go stale (403): look it up again once
+                    if "403" not in str(e):
+                        raise
+                    info = get_info(url, fresh=True)
+                    path = download(info, fmt, workdir)
                 learn(fmt, duration, time.time() - start)
             finally:
                 finish(job)

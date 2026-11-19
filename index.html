@@ -161,7 +161,7 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
 };
 
-const SERVER = "https://132-226-199-122.sslip.io";
+const SERVER = "https://tungtungtungsahur.tail7dd751.ts.net";
 const tab = Math.random().toString(36).slice(2, 12);  // only used to count people on the site
 
 // K = dev mode
@@ -296,8 +296,13 @@ $("url").addEventListener("keydown", e => { if (e.key === "Enter") go(e.shiftKey
 
 // links from the bookmarks (?url=) or the android share menu (?text=)
 const q = new URLSearchParams(location.search);
+const FORMATS = ["mp3", "mp4"];
 const shared = [q.get("url"), q.get("text"), q.get("title")].map(s => (s || "").match(/https?:\/\/\S+/)).find(Boolean);
-if (shared) { $("url").value = shared[0]; history.replaceState(null, "", location.pathname); status("Link ready. Pick MP3 or MP4."); }
+if (shared) {
+  $("url").value = shared[0]; history.replaceState(null, "", location.pathname);
+  // the bookmarks add &fmt= so the download starts right away
+  if (FORMATS.includes(q.get("fmt"))) go(q.get("fmt")); else status("Link ready. Pick MP3 or MP4.");
+}
 
 if (navigator.clipboard?.readText) {
   $("paste").hidden = false;
@@ -312,7 +317,8 @@ if (navigator.clipboard?.readText) {
 
 // chrome's drag preview only shows ~14 chars at the end, so the note has to be short
 function bookmarklets() {
-  const base = SERVER + "/dl?direct=1&fmt=";
+  // bookmarks open this page (not the server) so a server move never breaks them
+  const base = location.origin + location.pathname + "?fmt=";
   document.querySelectorAll(".bookmarklet").forEach(a => {
     a.href = "javascript:location.href=" + JSON.stringify(base + a.dataset.fmt + "&url=").replace(/"/g, "'") +
       "+encodeURIComponent(location.href)//bookmark-me!";

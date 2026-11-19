@@ -1,25 +1,38 @@
 #!/usr/bin/env bash
-# curl -fsSL https://raw.githubusercontent.com/rquw/ytmp34/main/install-pi.sh | bash
+# sets up the ytmp34 server on a raspberry pi (64-bit raspberry pi os)
+#   curl -fsSL https://raw.githubusercontent.com/rquw/ytmp34/main/install-pi.sh | bash
+# safe to run again: it updates everything and keeps the settings
 set -euo pipefail
 
-DIR="$HOME/ytmp34"
+D="$HOME/ytmp34"
 PORT=8765
 RAW="https://raw.githubusercontent.com/rquw/ytmp34/main"
+MEM_MB=$(( $(grep MemTotal /proc/meminfo | awk '{print $2}') / 1024 ))
+SLOTS=$(( MEM_MB < 1500 ? 1 : 2 ))
 
 echo "==> Installing packages"
 sudo apt-get update -qq
 sudo apt-get install -y -qq python3 python3-venv ffmpeg curl
 
-mkdir -p "$DIR"
-curl -fsSL "$RAW/server.py" -o "$DIR/server.py"
-[ -d "$DIR/venv" ] || python3 -m venv "$DIR/venv"
-"$DIR/venv/bin/pip" install -q -U pip yt-dlp
+# small pis (zero 2 w: 512 MB) need extra swap or a conversion can run out of memory
+if [ "$MEM_MB" -lt 1500 ] && [ ! -f /swapfile ]; then
+  echo "==> Adding 1 GB swap"
+  sudo fallocate -l 1G /swapfile
+  sudo chmod 600 /swapfile
+  sudo mkswap -q /swapfile
+  echo '/swapfile none swap sw,pri=10 0 0' | sudo tee -a /etc/fstab >/dev/null
+  sudo swapon /swapfile
+fi
 
-[ -f "$DIR/key" ] || head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' > "$DIR/key"
-KEY="$(cat "$DIR/key")"
+echo "==> Installing ytmp34"
+mkdir -p "$D/tmp"
+curl -fsSL "$RAW/server.py" -o "$D/server.py"
+[ -d "$D/venv" ] || python3 -m venv "$D/venv"
+"$D/venv/bin/pip" install -q -U pip "yt-dlp[default]" deno
 
-echo "==> Setting up service"
-sudo tee /etc/systemd/system/ytmp34.service >/dev/null <<EOF
+echo "==> Setting up the service"
+# YTMP34_COOKIES is only used if cookies.txt exists. a home internet connection usually doesn't need it.
+sudo tee /etc/systemd/system/ytmp34.service >/dev/null <<UNIT
 [Unit]
 Description=ytmp34 server
 After=network-online.target
@@ -27,43 +40,45 @@ Wants=network-online.target
 
 [Service]
 User=$USER
-Environment=YTMP34_KEY=$KEY
-ExecStartPre=-$DIR/venv/bin/pip install -q -U yt-dlp
-ExecStart=$DIR/venv/bin/python $DIR/server.py --port $PORT
+Environment=YTMP34_COOKIES=$D/cookies.txt
+Environment=YTMP34_MAX=$SLOTS
+# /tmp is in RAM on raspberry pi os 13, too small for videos
+Environment=TMPDIR=$D/tmp
+Environment=PATH=$D/venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStartPre=-$D/venv/bin/pip install -q -U "yt-dlp[default]" deno
+ExecStart=$D/venv/bin/python $D/server.py --host 127.0.0.1 --port $PORT
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-EOF
+UNIT
 
-# update yt-dlp every night
-sudo tee /etc/systemd/system/ytmp34-update.service >/dev/null <<EOF
+# restart every night at 4 so yt-dlp stays up to date
+sudo tee /etc/systemd/system/ytmp34-update.service >/dev/null <<UNIT
 [Service]
 Type=oneshot
 ExecStart=/bin/systemctl restart ytmp34
-EOF
-sudo tee /etc/systemd/system/ytmp34-update.timer >/dev/null <<EOF
+UNIT
+sudo tee /etc/systemd/system/ytmp34-update.timer >/dev/null <<UNIT
 [Timer]
 OnCalendar=*-*-* 04:00
 Persistent=true
 
 [Install]
 WantedBy=timers.target
-EOF
+UNIT
 sudo systemctl daemon-reload
-sudo systemctl enable --now ytmp34 ytmp34-update.timer
-sudo systemctl restart ytmp34
+sudo systemctl enable -q ytmp34 ytmp34-update.timer
+sudo systemctl restart ytmp34 ytmp34-update.timer
 
-echo "==> Setting up Tailscale Funnel (public HTTPS address)"
+echo "==> Setting up Tailscale Funnel (public https address, no port forwarding)"
 command -v tailscale >/dev/null || curl -fsSL https://tailscale.com/install.sh | sh
 sudo tailscale status >/dev/null 2>&1 || sudo tailscale up
 sudo tailscale funnel --bg "$PORT"
 
+for _ in $(seq 30); do curl -fsS "http://127.0.0.1:$PORT/ping" >/dev/null 2>&1 && break; sleep 2; done
 HOST="$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
 echo
-echo "=================================================================="
-echo " Done. Open this link once on each phone/PC (it saves the settings):"
-echo
-echo "   https://rquw.github.io/ytmp34/#s=https://$HOST&k=$KEY"
-echo "=================================================================="
+echo "ytmp34 is at https://$HOST"
+echo "Put that address in index.html (const SERVER) if it changed."
