@@ -163,7 +163,7 @@ def static():
     if not STATIC:
         os_name = next((l.split("=", 1)[1].strip('"') for l in read("/etc/os-release").splitlines()
                         if l.startswith("PRETTY_NAME=")), "?")
-        STATIC.update(os=os_name, kernel=os.uname().release, cores=os.cpu_count(),
+        STATIC.update(os=os_name, kernel=os.uname().release, core_count=os.cpu_count(),
                       python=sh("python3", "--version").replace("Python ", ""),
                       boot=time.time() - float(read("/proc/uptime", "0").split()[0]))
     return STATIC
