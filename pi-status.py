@@ -80,32 +80,112 @@ def untis():
     }
 
 
-cpu = {"pct": 0.0}
+live = {"cpu": 0.0, "cores": [], "net": {"rx": 0, "tx": 0}, "io": {"read": 0, "write": 0}}
 
 
-def sample_cpu():
-    # cpu use over the last second, measured in the background so requests stay cheap
-    def stat():
-        f = [int(x) for x in read("/proc/stat").splitlines()[0].split()[1:]]
-        return sum(f), f[3] + f[4]  # total, idle + iowait
-    prev = stat()
+def sample():
+    # once a second in the background: cpu (total + per core), network and sd card rates
+    def cpus():
+        out = []
+        for line in read("/proc/stat").splitlines():
+            if not line.startswith("cpu"):
+                break
+            f = [int(x) for x in line.split()[1:]]
+            out.append((sum(f), f[3] + f[4]))  # total, idle + iowait
+        return out
+
+    def net():
+        rx = tx = 0
+        for line in read("/proc/net/dev").splitlines()[2:]:
+            name, _, rest = line.partition(":")
+            if name.strip() == "lo":
+                continue
+            f = rest.split()
+            rx, tx = rx + int(f[0]), tx + int(f[8])
+        return rx, tx
+
+    def disk():
+        # sectors read/written on the sd card (512 bytes each)
+        for line in read("/proc/diskstats").splitlines():
+            f = line.split()
+            if len(f) > 9 and f[2] == "mmcblk0":
+                return int(f[5]) * 512, int(f[9]) * 512
+        return 0, 0
+
+    pc, pn, pd = cpus(), net(), disk()
     while True:
         time.sleep(1)
-        cur = stat()
-        dt, di = cur[0] - prev[0], cur[1] - prev[1]
-        cpu["pct"] = round(100 * (1 - di / dt), 1) if dt else 0.0
-        prev = cur
+        c, n, d = cpus(), net(), disk()
+        pct = [round(100 * (1 - (b[1] - a[1]) / (b[0] - a[0])), 1) if b[0] - a[0] else 0.0 for a, b in zip(pc, c)]
+        live.update(cpu=pct[0] if pct else 0.0, cores=pct[1:],
+                    net={"rx": n[0] - pn[0], "tx": n[1] - pn[1], "rx_total": n[0], "tx_total": n[1]},
+                    io={"read": d[0] - pd[0], "write": d[1] - pd[1]})
+        pc, pn, pd = c, n, d
+
+
+THROTTLE = {0: "undervoltage", 1: "freq_capped", 2: "throttled", 3: "soft_temp_limit"}
+
+
+def throttled():
+    # vcgencmd get_throttled -> which power/heat problems happen now, and which happened since boot
+    raw = sh("vcgencmd", "get_throttled").replace("throttled=", "")
+    try:
+        v = int(raw, 16)
+    except ValueError:
+        return None
+    return {"raw": raw, "now": [n for b, n in THROTTLE.items() if v >> b & 1],
+            "since_boot": [n for b, n in THROTTLE.items() if v >> (b + 16) & 1]}
+
+
+def vc(*args, strip=""):
+    out = sh("vcgencmd", *args)
+    try:
+        return float(out.split("=")[-1].rstrip(strip))
+    except ValueError:
+        return None
+
+
+def top_processes():
+    out = sh("ps", "-eo", "comm,%cpu,%mem,rss", "--sort=-%cpu", "--no-headers")
+    procs = []
+    for line in out.splitlines()[:6]:
+        f = line.split()
+        if len(f) >= 4:
+            procs.append({"name": f[0], "cpu": float(f[1]), "mem": float(f[2]), "rss": int(f[3]) * 1024})
+    return procs
+
+
+STATIC = {}
+
+
+def static():
+    # things that don't change while running
+    if not STATIC:
+        os_name = next((l.split("=", 1)[1].strip('"') for l in read("/etc/os-release").splitlines()
+                        if l.startswith("PRETTY_NAME=")), "?")
+        STATIC.update(os=os_name, kernel=os.uname().release, cores=os.cpu_count(),
+                      python=sh("python3", "--version").replace("Python ", ""),
+                      boot=time.time() - float(read("/proc/uptime", "0").split()[0]))
+    return STATIC
 
 
 slow = {"at": 0, "data": {}}
 
 
 def slow_parts():
-    # systemctl/ss/vcgencmd are slowish on a pi zero: refresh them at most every 5 s
+    # systemctl/ss/vcgencmd/ps are slowish on a pi zero: refresh them at most every 5 s
     if time.time() - slow["at"] > 5:
-        slow["data"] = {"services": {s: sh("systemctl", "is-active", s) or "unknown" for s in SERVICES},
-                        "proxy_clients": proxy_clients(), "untis": untis(),
-                        "throttled": sh("vcgencmd", "get_throttled").replace("throttled=", "") or None}
+        slow["data"] = {
+            "services": {s: sh("systemctl", "is-active", s) or "unknown" for s in SERVICES},
+            "proxy_clients": proxy_clients(), "untis": untis(),
+            "throttle": throttled(),
+            "volts": vc("measure_volts", "core", strip="V"),
+            "arm_clock": vc("measure_clock", "arm"), "core_clock": vc("measure_clock", "core"),
+            "gpu_temp": vc("measure_temp", strip="'C"),
+            "ssid": sh("iwgetid", "-r") or None,
+            "processes": sum(1 for d in os.listdir("/proc") if d.isdigit()),
+            "top": top_processes(),
+        }
         slow["at"] = time.time()
     return slow["data"]
 
@@ -114,17 +194,23 @@ def status():
     load1, load5, load15 = os.getloadavg()
     disk = shutil.disk_usage("/")
     temp = read("/sys/class/thermal/thermal_zone0/temp", "0").strip()
+    freq = read("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", "").strip()
+    fmax = read("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq", "").strip()
     return {
         "host": socket.gethostname(),
         "model": read("/proc/device-tree/model").strip("\x00\n"),
         "time": time.time(),
         "uptime": float(read("/proc/uptime", "0").split()[0]),
         "load": [load1, load5, load15],
-        "cpu": cpu["pct"],
+        "cpu": live["cpu"], "cores": live["cores"],
         "cpu_temp": int(temp) / 1000 if temp.isdigit() else None,
+        "freq_mhz": int(freq) / 1000 if freq.isdigit() else None,
+        "freq_max_mhz": int(fmax) / 1000 if fmax.isdigit() else None,
+        "net": live["net"], "io": live["io"],
         "memory": memory(),
         "disk": {"total": disk.total, "free": disk.free},
         "wifi": wifi(),
+        **static(),
         **slow_parts(),
     }
 
@@ -151,5 +237,5 @@ if __name__ == "__main__":
     p.add_argument("--host", required=True)
     p.add_argument("--port", type=int, default=8780)
     a = p.parse_args()
-    threading.Thread(target=sample_cpu, daemon=True).start()
+    threading.Thread(target=sample, daemon=True).start()
     ThreadingHTTPServer((a.host, a.port), Handler).serve_forever()
