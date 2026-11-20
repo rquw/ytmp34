@@ -2,7 +2,9 @@
 """PRISMO's little jobs on the pi. pushes go to the same ntfy topic as the untis watcher.
 
   python3 prismo.py briefing   # morning push: weather, rain warning, untis changes today, prismo status
-  python3 prismo.py watchdog   # checks the sites (a timer runs this every minute), pushes when one goes down / comes back
+  python3 prismo.py watch      # runs forever (systemd service): checks the sites one after another, spread over each
+                               # minute, pushes when one goes down / comes back. live state in /dev/shm for pie mode
+  python3 prismo.py watchdog   # one round of checks, then exit
   python3 prismo.py status     # print what the watchdog knows
 
 config.json next to this file (not in the repo):
@@ -13,6 +15,7 @@ import datetime as dt
 import json
 import os
 import sys
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -20,6 +23,7 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG = os.path.join(HERE, "config.json")
 STATE = os.path.join(HERE, "state.json")
+LIVE = "/dev/shm/prismo-watch.json"  # in ram: written after every check without wearing out the sd card
 UNTIS = os.path.expanduser("~/untis-watch")
 FAILS_BEFORE_ALERT = 3  # one slow answer isn't an outage
 
@@ -177,6 +181,24 @@ def check(site):
         return False, round(time.time() - start, 2), str(e)[:120]
 
 
+def record(site, s, ok, took, err):
+    now = time.time()
+    s.update(checked=now, ok=ok, took=took, error=err, url=site["url"])
+    s["hist"] = (s.get("hist") or [])[-29:] + [took if ok else -1]
+    s["n"], s["n_ok"] = s.get("n", 0) + 1, s.get("n_ok", 0) + (1 if ok else 0)
+    if ok:
+        if s.get("down_since"):
+            push(f"✅ {site['name']} ist wieder online", f"war {dur(now - s['down_since'])} weg. PRISMO hat aufgepasst 🐕",
+                 tags=["white_check_mark"])
+        s.update(fails=0, down_since=None, last_ok=now)
+    else:
+        s["fails"] = s.get("fails", 0) + 1
+        need = site.get("fails", FAILS_BEFORE_ALERT)
+        if s["fails"] == need:
+            s["down_since"] = now - 60 * site.get("every", 1) * (need - 1)
+            push(f"🚨 {site['name']} ist offline!", f"{site['url']}\n{err or 'antwortet nicht'}", urgent=True, tags=["rotating_light"])
+
+
 def watchdog():
     cfg = load(CONFIG, {})
     state = load(STATE, {})
@@ -185,22 +207,55 @@ def watchdog():
     for site in cfg.get("sites", []):
         if minute % site.get("every", 1):
             continue  # render apps only hourly: every check wakes them for 15 min and render's free plan has 750 h/month
-        s = sites.setdefault(site["name"], {"fails": 0})
-        ok, took, err = check(site)
-        now = time.time()
-        s.update(checked=now, ok=ok, took=took, error=err, url=site["url"])
-        if ok:
-            if s.get("down_since"):
-                push(f"✅ {site['name']} ist wieder online", f"war {dur(now - s['down_since'])} weg. PRISMO hat aufgepasst 🐕",
-                     tags=["white_check_mark"])
-            s.update(fails=0, down_since=None, last_ok=now)
-        else:
-            s["fails"] = s.get("fails", 0) + 1
-            need = site.get("fails", FAILS_BEFORE_ALERT)
-            if s["fails"] == need:
-                s["down_since"] = now - 60 * site.get("every", 1) * (need - 1)
-                push(f"🚨 {site['name']} ist offline!", f"{site['url']}\n{err or 'antwortet nicht'}", urgent=True, tags=["rotating_light"])
+        record(site, sites.setdefault(site["name"], {"fails": 0}), *check(site))
     save(STATE, state)
+
+
+def watch():
+    # one check every few seconds instead of all at once every minute: pie mode sees a steady stream of pings
+    lock = threading.Lock()
+    sites = load(STATE, {}).get("sites", {})
+    running, due, cfg_at, cfg, persisted = set(), {}, 0, {}, time.time()
+
+    def run(site):
+        try:
+            ok, took, err = check(site)
+            with lock:
+                s = sites.setdefault(site["name"], {"fails": 0})
+            record(site, s, ok, took, err)
+            with lock:
+                save(LIVE, {"at": time.time(), "sites": sites})
+        finally:
+            running.discard(site["name"])
+
+    while True:
+        try:
+            if os.path.getmtime(CONFIG) != cfg_at:  # new sites in config.json are picked up without a restart
+                cfg_at, cfg = os.path.getmtime(CONFIG), load(CONFIG, {})
+                names = [x["name"] for x in cfg.get("sites", [])]
+                start = time.time() + 3
+                due = {n: due.get(n, start + i * 60.0 / max(1, len(names))) for i, n in enumerate(names)}
+                with lock:
+                    for n in list(sites):
+                        if n not in names:
+                            del sites[n]
+        except OSError:
+            pass
+        now = time.time()
+        for site in cfg.get("sites", []):
+            n = site["name"]
+            if n in running or now < due.get(n, now):
+                continue
+            due[n] = max(due.get(n, now) + 60 * site.get("every", 1), now + 5)
+            running.add(n)
+            threading.Thread(target=run, args=(site,), daemon=True).start()
+        if now - persisted > 60:  # the sd card copy once a minute (the briefing reads it); keep its other keys
+            persisted = now
+            with lock:
+                state = load(STATE, {})
+                state["sites"] = json.loads(json.dumps(sites))
+            save(STATE, state)
+        time.sleep(0.5)
 
 
 if __name__ == "__main__":
@@ -209,5 +264,7 @@ if __name__ == "__main__":
         briefing()
     elif cmd == "watchdog":
         watchdog()
+    elif cmd == "watch":
+        watch()
     else:
         print(json.dumps(load(STATE, {}), ensure_ascii=False, indent=1))

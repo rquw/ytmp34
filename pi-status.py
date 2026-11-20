@@ -4,6 +4,7 @@
 #   python3 pi-status.py --host 100.x.y.z --port 8780
 import argparse
 import json
+import math
 import os
 import re
 import urllib.request
@@ -16,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HOME = os.path.expanduser("~")
 SERVICES = ["ytmp34", "ytmp34-proxy", "untis-watch.timer", "tailscaled", "ytmp34-update.timer",
-            "prismo-watchdog.timer", "prismo-briefing.timer"]
+            "prismo-watchdog", "prismo-briefing.timer"]
 
 
 def read(path, default=""):
@@ -223,11 +224,19 @@ def slow_parts():
 
 
 def prismo():
-    # the briefing + watchdog (prismo.py) state, for pie mode
+    # the briefing + watchdog (prismo.py) state, for pie mode. the watcher keeps the live copy in ram (/dev/shm)
     st = load(os.path.join(HOME, "prismo", "state.json"), {}) or {}
-    return {"briefing": st.get("briefing"),
-            "sites": {n: {k: v.get(k) for k in ("ok", "took", "checked", "down_since", "url", "error")}
-                      for n, v in (st.get("sites") or {}).items()}}
+    sites = st.get("sites") or {}
+    try:
+        if time.time() - os.path.getmtime(WATCH_LIVE) < 300:
+            sites = (load(WATCH_LIVE, {}) or {}).get("sites") or sites
+    except OSError:
+        pass
+    keys = ("ok", "took", "checked", "down_since", "url", "error", "hist", "n", "n_ok")
+    return {"briefing": st.get("briefing"), "sites": {n: {k: v.get(k) for k in keys} for n, v in sites.items()}}
+
+
+WATCH_LIVE = "/dev/shm/prismo-watch.json"
 
 
 def status():
@@ -252,22 +261,17 @@ def status():
         "wifi": wifi(),
         **static(),
         **slow_parts(),
-        "pet": pet_status(int(temp) / 1000 if temp.isdigit() else None, load1,
-                          float(read("/proc/uptime", "0").split()[0])),
+        "led": {"what": led_busy["what"], "left": max(0, round(led_busy["until"] - time.time(), 1))},
+        "planes": planes_view(),
     }
 
 
 # ---------------------------------------------------------------------------------------------
-# PRISMO the pet: lives on the pi, its heart is the green LED. food = converted videos (+ snacks),
-# love = being petted. both slowly go down. actions come in from pie mode (via oracle, password checked there).
+# PRISMO's green LED: pie mode can make it beat like a heart, blink or morse a message into the room.
 
 LED = "/sys/class/leds/ACT"
 LED_DEFAULT = "actpwr"
-PET = os.path.join(HOME, "prismo", "pet.json")
-ORACLE_PING = "https://132-226-199-122.sslip.io/ping"
-pet_lock = threading.Lock()
 led_busy = {"what": None, "until": 0}
-pet_saved = {"at": 0}
 
 MORSE = {"A": ".-", "B": "-...", "C": "-.-.", "D": "-..", "E": ".", "F": "..-.", "G": "--.", "H": "....", "I": "..",
          "J": ".---", "K": "-.-", "L": ".-..", "M": "--", "N": "-.", "O": "---", "P": ".--.", "Q": "--.-", "R": ".-.",
@@ -322,125 +326,173 @@ def heartbeat(n=4):
     return steps
 
 
-def pet_load():
-    p = load(PET, None) or {}
-    now = time.time()
-    p.setdefault("born", now); p.setdefault("food", 70.0); p.setdefault("love", 70.0)
-    p.setdefault("xp", 0); p.setdefault("pets", 0); p.setdefault("snacks", []); p.setdefault("events", [])
-    p.setdefault("updated", now); p.setdefault("videos", None); p.setdefault("checked_videos", 0)
-    return p
-
-
-def pet_save(p):
-    tmp = PET + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(p, f, ensure_ascii=False)
-    os.replace(tmp, PET)
-
-
-def pet_event(p, text):
-    p["events"] = (p["events"] + [{"at": time.time(), "text": text}])[-12:]
-
-
-def pet_tick(p):
-    # hunger and loneliness grow over time; converted videos are food
-    now = time.time()
-    hours = max(0.0, (now - p["updated"]) / 3600)
-    p["food"] = max(0.0, p["food"] - 3.0 * hours)
-    p["love"] = max(0.0, p["love"] - 2.5 * hours)
-    p["updated"] = now
-    if now - p["checked_videos"] > 60:
-        p["checked_videos"] = now
-        try:
-            with urllib.request.urlopen(ORACLE_PING, timeout=5) as r:
-                videos = json.loads(r.read()).get("videos", 0)
-            if p["videos"] is not None and videos > p["videos"]:
-                n = videos - p["videos"]
-                p["food"] = min(100.0, p["food"] + 8 * n)
-                p["xp"] += 3 * n
-                pet_event(p, f"hat {n} {'Video' if n == 1 else 'Videos'} gefressen 🎵😋")
-            p["videos"] = videos
-        except Exception:
-            pass
-    p["snacks"] = [t for t in p["snacks"] if now - t < 3600]
-
-
-def pet_view(p, temp, load1, uptime):
-    hour = time.localtime().tm_hour
-    asleep = hour >= 23 or hour < 6
-    level = int((p["xp"] / 5) ** 0.5) + 1
-    mood = min(p["food"], p["love"])
-    if uptime < 300:
-        face, state = "🥱", "gerade aufgewacht"
-    elif temp and temp > 65:
-        face, state = "🥵", "schwitzt"
-    elif asleep and not led_busy["what"]:
-        face, state = "😴", "schläft"
-    elif load1 > 2.5:
-        face, state = "😵‍💫", "arbeitet hart"
-    elif mood > 70:
-        face, state = "🥰", "super happy"
-    elif mood > 45:
-        face, state = "😊", "zufrieden"
-    elif mood > 20:
-        face, state = "😕", "braucht Aufmerksamkeit"
-    else:
-        face, state = "😭", "fühlt sich vergessen"
-    return {"face": face, "state": state, "asleep": asleep, "food": round(p["food"], 1), "love": round(p["love"], 1),
-            "level": level, "xp": p["xp"], "pets": p["pets"], "age_days": int((time.time() - p["born"]) // 86400),
-            "snacks_left": max(0, 3 - len(p["snacks"])), "events": p["events"][::-1][:8],
-            "led": {"what": led_busy["what"], "left": max(0, round(led_busy["until"] - time.time(), 1))}}
-
-
-def pet_action(body):
+def led_action(body):
     action = body.get("action")
-    with pet_lock:
-        p = pet_load()
-        pet_tick(p)
-        if led_busy["what"] and action in ("pet", "morse", "wave"):
-            return 409, {"error": "PRISMO ist gerade beschäftigt ✨", "left": round(led_busy["until"] - time.time(), 1)}
-        if action == "pet":
-            p["love"] = min(100.0, p["love"] + 15)
-            p["pets"] += 1
-            p["xp"] += 1
-            pet_event(p, "wurde gestreichelt 💜")
-            secs = led_play(heartbeat(), "herzklopfen")
-            msg = "PRISMO schnurrt. Sein Licht klopft wie ein Herz 💓"
-        elif action == "snack":
-            if len(p["snacks"]) >= 3:
-                return 429, {"error": "Genug Snacks für diese Stunde 🍪🚫"}
-            p["snacks"].append(time.time())
-            p["food"] = min(100.0, p["food"] + 10)
-            p["xp"] += 1
-            pet_event(p, "hat einen Snack bekommen 🍪")
-            secs = led_play([(False, 0.2), (True, 0.08), (False, 0.08)] * 6, "mampft")
-            msg = "Mampf mampf 🍪"
-        elif action == "wave":
-            secs = led_play([(False, 0.2)] + [(True, 0.05), (False, 0.05)] * 20, "winkt")
-            pet_event(p, "hat ins Zimmer gewinkt 👋")
-            msg = "PRISMO blinkt wie wild 👋"
-        elif action == "morse":
-            text = re.sub(r"[^A-Za-z0-9ÄÖÜäöü?! ]", "", str(body.get("text", ""))).strip()[:24]
-            if not text:
-                return 400, {"error": "Nur Buchstaben, Zahlen, ? und ! (max. 24)"}
-            secs = led_play(morse_steps(text), "morst „%s“" % text)
-            p["xp"] += 2
-            pet_event(p, "hat „%s“ gemorst 📡" % text)
-            msg = "PRISMO morst „%s“ in dein Zimmer 📡" % text
-        else:
-            return 400, {"error": "unbekannte Aktion"}
-        pet_save(p)
-        return 200, {"ok": True, "message": msg, "seconds": round(secs, 1)}
+    if led_busy["what"]:
+        return 409, {"error": "Das Licht ist gerade beschäftigt ✨", "left": round(led_busy["until"] - time.time(), 1)}
+    if action in ("heart", "pet"):
+        secs, msg = led_play(heartbeat(), "Herzschlag"), "Das Licht klopft wie ein Herz 💓"
+    elif action == "wave":
+        secs, msg = led_play([(False, 0.2)] + [(True, 0.05), (False, 0.05)] * 20, "blinkt"), "Das Licht blinkt wie wild 👋"
+    elif action == "morse":
+        text = re.sub(r"[^A-Za-z0-9ÄÖÜäöü?! ]", "", str(body.get("text", ""))).strip()[:24]
+        if not text:
+            return 400, {"error": "Nur Buchstaben, Zahlen, ? und ! (max. 24)"}
+        secs, msg = led_play(morse_steps(text), "morst „%s“" % text), "Das Licht morst „%s“ in dein Zimmer 📡" % text
+    else:
+        return 400, {"error": "unbekannte Aktion"}
+    return 200, {"ok": True, "message": msg, "seconds": round(secs, 1)}
 
 
-def pet_status(temp, load1, uptime):
-    with pet_lock:
-        p = pet_load()
-        pet_tick(p)
-        if time.time() - pet_saved["at"] > 60:  # don't wear out the sd card: save at most once a minute
-            pet_save(p)
-            pet_saved["at"] = time.time()
-        return pet_view(p, temp, load1, uptime)
+# ---------------------------------------------------------------------------------------------
+# planes over PRISMO: live ADS-B positions from adsb.lol (free, no key), routes from adsbdb.com.
+# pie mode only ever gets positions relative to home (km east / north), never the home coordinates.
+# a push when one flies (nearly) straight over the house.
+
+PLANE_SOURCES = ["https://api.adsb.lol/v2/point/{lat}/{lon}/{nm}", "https://api.airplanes.live/v2/point/{lat}/{lon}/{nm}"]
+PLANES = {"at": 0, "list": [], "error": None, "radius": 50, "today": set(), "day": None, "overhead": None, "pushed": {}, "last_push": 0}
+ROUTES = {}  # callsign -> (fetched at, route or None)
+TYPES = {"A19N": "Airbus A319neo", "A20N": "Airbus A320neo", "A21N": "Airbus A321neo", "A318": "Airbus A318", "A319": "Airbus A319",
+         "A320": "Airbus A320", "A321": "Airbus A321", "A332": "Airbus A330-200", "A333": "Airbus A330-300", "A339": "Airbus A330neo",
+         "A343": "Airbus A340-300", "A359": "Airbus A350-900", "A35K": "Airbus A350-1000", "A388": "Airbus A380", "BCS1": "Airbus A220-100",
+         "BCS3": "Airbus A220-300", "B737": "Boeing 737-700", "B738": "Boeing 737-800", "B739": "Boeing 737-900", "B38M": "Boeing 737 MAX 8",
+         "B39M": "Boeing 737 MAX 9", "B744": "Boeing 747-400", "B748": "Boeing 747-8", "B752": "Boeing 757-200", "B763": "Boeing 767-300",
+         "B772": "Boeing 777-200", "B77L": "Boeing 777-200LR", "B77W": "Boeing 777-300ER", "B778": "Boeing 777-8", "B788": "Boeing 787-8",
+         "B789": "Boeing 787-9", "B78X": "Boeing 787-10", "E190": "Embraer 190", "E195": "Embraer 195", "E290": "Embraer E190-E2",
+         "E295": "Embraer E195-E2", "E75L": "Embraer 175", "CRJ9": "Bombardier CRJ900", "CRJ7": "Bombardier CRJ700", "DH8D": "Dash 8-400",
+         "AT76": "ATR 72-600", "AT75": "ATR 72-500", "AT45": "ATR 42-500", "C172": "Cessna 172", "C152": "Cessna 152", "P28A": "Piper Cherokee",
+         "DA40": "Diamond DA40", "DA42": "Diamond DA42", "EC35": "Hubschrauber EC135", "EC45": "Hubschrauber H145", "PC12": "Pilatus PC-12",
+         "C56X": "Cessna Citation Excel", "GLF6": "Gulfstream G650", "CL35": "Challenger 350", "C17": "Boeing C-17", "A400": "Airbus A400M"}
+
+
+def plane_config():
+    cfg = load(os.path.join(HOME, "prismo", "config.json"), {}) or {}
+    return cfg.get("lat"), cfg.get("lon"), cfg.get("planes") or {}
+
+
+def get_json(url, timeout=8):
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "prismo-radar"}), timeout=timeout) as r:
+        return json.loads(r.read())
+
+
+def plane_route(cs, budget):
+    hit = ROUTES.get(cs)
+    if hit and time.time() - hit[0] < 6 * 3600:
+        return hit[1]
+    if budget[0] <= 0 or not re.fullmatch(r"[A-Z]{3}[0-9A-Z]{1,5}", cs):
+        return hit[1] if hit else None
+    budget[0] -= 1
+    route = None
+    try:
+        fr = get_json("https://api.adsbdb.com/v0/callsign/" + cs, 6).get("response", {}).get("flightroute") or {}
+        o, d = fr.get("origin") or {}, fr.get("destination") or {}
+        route = {"airline": (fr.get("airline") or {}).get("name"), "iata": fr.get("callsign_iata"),
+                 "from": o.get("municipality") or o.get("name"), "from_code": o.get("iata_code"),
+                 "to": d.get("municipality") or d.get("name"), "to_code": d.get("iata_code")}
+    except Exception:
+        pass
+    ROUTES[cs] = (time.time(), route)
+    if len(ROUTES) > 3000:
+        for k in sorted(ROUTES, key=lambda k: ROUTES[k][0])[:1000]:
+            del ROUTES[k]
+    return route
+
+
+def plane_push(p):
+    title = "✈️ Gerade über dir: " + (p.get("airline") or "") + " " + (p.get("iata") or p.get("cs") or p["id"])
+    lines = []
+    if p.get("from") and p.get("to"):
+        lines.append(f"{p['from']} → {p['to']}")
+    if p.get("type"):
+        lines.append(p["type"] + (f" ({p['reg']})" if p.get("reg") else ""))
+    lines.append(f"{p['alt']:,} m hoch · {p['speed']} km/h".replace(",", "."))
+    msg = "\n".join(lines)
+    try:
+        cfg = load(os.path.join(HOME, "untis-watch", "config.json"), {}) or {}
+        body = {"topic": cfg["topic"], "title": title.strip(), "message": msg, "priority": 5, "tags": ["airplane"]}
+        urllib.request.urlopen(urllib.request.Request(cfg.get("ntfy", "https://ntfy.sh"), json.dumps(body).encode(),
+                                                      {"Content-Type": "application/json"}), timeout=15).read()
+        log = os.path.join(HOME, "untis-watch", "pushes.json")
+        pushes = (load(log, []) or [])[-19:] + [{"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "title": title.strip(), "message": msg, "urgent": False}]
+        with open(log + ".tmp", "w") as f:
+            json.dump(pushes, f, ensure_ascii=False, indent=1)
+        os.replace(log + ".tmp", log)
+    except Exception:
+        pass
+
+
+def planes_loop():
+    while True:
+        lat0, lon0, pc = plane_config()
+        if lat0 is None:
+            PLANES["error"] = "keine Position in config.json"
+            time.sleep(60)
+            continue
+        radius = float(pc.get("radius_km", 50))
+        every = float(pc.get("every_s", 8))
+        # the api only gets the position rounded to ~1 km
+        q = {"lat": round(lat0, 2), "lon": round(lon0, 2), "nm": int(radius / 1.852) + 3}
+        data, err = None, None
+        for src in PLANE_SOURCES:
+            try:
+                data = get_json(src.format(**q))
+                break
+            except Exception as e:
+                err = str(e)[:120]
+        if data is None:
+            PLANES["error"] = err
+            time.sleep(every * 2)
+            continue
+        budget = [3]  # at most 3 new route lookups per round, adsbdb is a free service
+        kx, ky = 111.32 * math.cos(math.radians(lat0)), 110.574
+        out, now = [], time.time()
+        today = time.strftime("%Y-%m-%d")
+        if PLANES["day"] != today:
+            PLANES["day"], PLANES["today"] = today, set()
+        for a in data.get("ac") or []:
+            if a.get("lat") is None or a.get("lon") is None or (a.get("seen_pos") or 0) > 60:
+                continue
+            x, y = (a["lon"] - lon0) * kx, (a["lat"] - lat0) * ky
+            dist = math.hypot(x, y)
+            if dist > radius:
+                continue
+            ground = a.get("alt_baro") == "ground"
+            alt = 0 if ground else int((a.get("alt_baro") or a.get("alt_geom") or 0) * 0.3048)
+            cs = (a.get("flight") or "").strip()
+            p = {"id": a.get("hex"), "cs": cs, "reg": a.get("r"), "type": TYPES.get(a.get("t"), a.get("desc") or a.get("t")),
+                 "op": a.get("ownOp"), "x": round(x, 2), "y": round(y, 2), "dist": round(dist, 1), "alt": alt,
+                 "speed": int((a.get("gs") or 0) * 1.852), "track": round(a.get("track") or a.get("true_heading") or 0),
+                 "climb": round((a.get("baro_rate") or a.get("geom_rate") or 0) * 0.00508, 1), "age": round(a.get("seen_pos") or 0, 1),
+                 "ground": ground, "squawk": a.get("squawk")}
+            r = plane_route(cs, budget) if cs else None
+            if r:
+                p.update({k: v for k, v in r.items() if v})
+            out.append(p)
+            PLANES["today"].add(p["id"])
+            # straight over the house? closest point on its path during the next round
+            v = p["speed"] / 3600
+            vx, vy = v * math.sin(math.radians(p["track"])), v * math.cos(math.radians(p["track"]))
+            t = max(0.0, min(every + 2, -(x * vx + y * vy) / (vx * vx + vy * vy))) if v else 0.0
+            closest = min(dist, math.hypot(x + vx * t, y + vy * t))
+            night = pc.get("night", [22, 7])
+            h = time.localtime().tm_hour
+            quiet = night and (h >= night[0] or h < night[1])
+            if (closest <= float(pc.get("push_km", 2.5)) and not ground and p["id"] not in PLANES["pushed"]
+                    and now - PLANES["last_push"] > 60 * float(pc.get("push_gap_min", 15)) and not quiet):
+                PLANES["pushed"][p["id"]] = now
+                PLANES["last_push"] = now
+                PLANES["overhead"] = {**p, "at": now}
+                threading.Thread(target=plane_push, args=(p,), daemon=True).start()
+        PLANES["pushed"] = {k: t for k, t in PLANES["pushed"].items() if now - t < 7200}
+        out.sort(key=lambda p: p["dist"])
+        PLANES.update(at=now, list=out[:60], error=None, radius=radius)
+        time.sleep(every)
+
+
+def planes_view():
+    o = PLANES["overhead"]
+    return {"at": PLANES["at"], "radius": PLANES["radius"], "list": PLANES["list"], "error": PLANES["error"],
+            "today": len(PLANES["today"]), "overhead": o if o and time.time() - o["at"] < 3600 else None}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -468,7 +520,7 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 2000)) or b"{}")
         except ValueError:
             body = {}
-        code, out = pet_action(body)
+        code, out = led_action(body)
         data = json.dumps(out, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
@@ -488,4 +540,5 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(HOME, "prismo"), exist_ok=True)
     history_load()
     threading.Thread(target=sample, daemon=True).start()
+    threading.Thread(target=planes_loop, daemon=True).start()
     ThreadingHTTPServer((a.host, a.port), Handler).serve_forever()

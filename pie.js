@@ -1,4 +1,5 @@
-// PRISMO — fabios kleiner helfer. the owner's page ("pie mode"): the pet, a live map of everything, stats.
+// PRISMO — fabios kleiner helfer. the owner's page ("pie mode"): a live map of everything, the plane radar,
+// the watchdog pinging every site, the real LED, stats.
 // loaded by index.html after L ×5 / 5 logo taps / MP3 MP4 MP3 MP3 MP4 MP4. the password is checked by the server.
 (() => {
   const S = typeof SERVER !== "undefined" ? SERVER : "";
@@ -54,27 +55,54 @@
   #pie .lvl { height: 10px; border-radius: 99px; background: var(--track); overflow: hidden; }
   #pie .lvl i { display: block; height: 100%; border-radius: 99px; background: var(--grad); transition: width .8s ease; }
 
-  /* the pet */
-  #pie .pet { display: grid; grid-template-columns: auto 1fr; gap: 18px; align-items: center; }
-  #pie .face { width: 120px; height: 120px; border-radius: 34px; display: grid; place-items: center; font-size: 68px; position: relative;
-    background: linear-gradient(145deg, rgba(141,123,255,.18), rgba(255,116,200,.18) 60%, rgba(56,214,196,.2)); }
-  #pie .face span { display: inline-block; animation: pie-bob 3s ease-in-out infinite; }
-  #pie .face.sleep span { animation-duration: 6s; }
-  @keyframes pie-bob { 50% { transform: translateY(-6px) rotate(-3deg); } }
-  #pie .led { position: absolute; right: 10px; top: 10px; width: 14px; height: 14px; border-radius: 50%; background: #2a6b3a; box-shadow: inset 0 0 0 2px rgba(0,0,0,.15); }
+  /* the real LED */
+  #pie .led { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-left: 8px; vertical-align: 2px; background: #2a6b3a; box-shadow: inset 0 0 0 2px rgba(0,0,0,.15); }
   #pie .led.on { background: #3dff7a; box-shadow: 0 0 12px #3dff7a, 0 0 24px #3dff7a; animation: pie-led .25s steps(1) infinite; }
   @keyframes pie-led { 50% { background: #2a6b3a; box-shadow: none; } }
-  #pie .name { font: 800 24px/1 "Baloo 2", system-ui, sans-serif; }
-  #pie .bubble { position: relative; margin: 10px 0; padding: 10px 14px; border-radius: 16px; background: var(--track); font-weight: 600; }
-  #pie .bubble::before { content: ""; position: absolute; left: -7px; top: 14px; border: 7px solid transparent; border-right-color: var(--track); border-left: 0; }
-  #pie .stats { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; font-size: 13px; color: var(--dim); }
-  #pie .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  #pie .actions { display: flex; flex-wrap: wrap; gap: 8px; }
   #pie .morse { display: flex; gap: 8px; margin-top: 10px; }
   #pie .morse input { flex: 1 1 auto; min-width: 0; width: 100%; font: 600 16px system-ui, sans-serif; padding: 9px 14px; border-radius: 999px; border: 2px solid var(--line);
     background: transparent; color: var(--ink); text-transform: uppercase; }
   #pie .toast { min-height: 1.4em; margin-top: 8px; font-weight: 600; }
-  @media (max-width: 520px) { #pie .pet { grid-template-columns: 1fr; justify-items: center; text-align: center; } #pie .bubble::before { display: none; }
-    #pie .stats { width: 100%; text-align: left; } #pie .actions { justify-content: center; } #pie .logo { font-size: 32px; } #pie .logo small { display: none; } }
+  @media (max-width: 520px) { #pie .logo { font-size: 32px; } #pie .logo small { display: none; } }
+
+  /* plane radar */
+  #pie .radarbox { position: relative; border-radius: 18px; overflow: hidden; margin: 0 -4px; background: radial-gradient(circle at 50% 40%, #0c2430, #040b10 75%); }
+  #pie svg.radar { display: block; width: 100%; max-width: 560px; height: auto; margin: 0 auto; }
+  #pie .radar .rg { fill: none; stroke: rgba(56,214,196,.22); stroke-width: 1; }
+  #pie .radar .rx { stroke: rgba(56,214,196,.1); stroke-width: 1; }
+  #pie .radar .rl { fill: rgba(127,240,226,.6); font: 600 10px system-ui, sans-serif; }
+  #pie .radar .cd { fill: rgba(127,240,226,.75); font: 800 11px system-ui, sans-serif; text-anchor: middle; }
+  #pie .radar .sweep { transform-origin: 200px 200px; animation: pie-spin 4s linear infinite; }
+  @keyframes pie-spin { to { transform: rotate(360deg); } }
+  #pie .radar .pl { cursor: pointer; }
+  #pie .radar .pl text { font: 700 10px system-ui, sans-serif; fill: #e8fbff; paint-order: stroke; stroke: #040b10; stroke-width: 3px; }
+  #pie .radar .pl text.a { font-weight: 600; fill: #9fd3d6; }
+  #pie .radar .pl.sel .gl { stroke: #fff; stroke-width: 1.6px; }
+  #pie .radar .pl .selr { opacity: 0; } #pie .radar .pl.sel .selr { opacity: .9; }
+  #pie .radar .tr { fill: none; stroke-width: 1.6; opacity: .4; stroke-linecap: round; }
+  #pie .rinfo { padding: 10px 14px 4px; color: #cdeff0; font-size: 13.5px; min-height: 3.4em; }
+  #pie .rinfo b { color: #fff; }
+  #pie .plist { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 6px; padding: 6px 10px 12px; }
+  #pie .plist button { all: unset; cursor: pointer; padding: 6px 10px; border-radius: 10px; background: rgba(255,255,255,.06); color: #d9f6f6; font: 500 12.5px system-ui, sans-serif;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #pie .plist button.sel { background: rgba(56,214,196,.25); }
+
+  /* watchdog live */
+  #pie .watchbox { position: relative; border-radius: 18px; overflow: hidden; margin: 0 -4px; background: radial-gradient(circle at 50% 50%, #221b4d, #0b0920 80%); }
+  #pie svg.watch { display: block; width: 100%; height: auto; }
+  #pie .watch .sp { stroke: rgba(255,255,255,.07); stroke-width: 1; }
+  #pie .watch .sn { stroke-width: 2.5; fill: #15112e; stroke: #6c6788; transition: fill .4s; }
+  #pie .watch .sn.ok { stroke: #3dff9a; } #pie .watch .sn.bad { stroke: #ff4d7a; fill: rgba(255,77,122,.35); }
+  #pie .watch .sn.ping { fill: #ffffff; transition: none; }
+  #pie .watch text { fill: #ece9ff; font: 600 14px system-ui, sans-serif; }
+  #pie .watch text.ms { fill: #a9a3d6; font-size: 12px; }
+  @media (max-width: 520px) { #pie .watch text { font-size: 19px; } #pie .watch text.ms { font-size: 16px; } #pie .watch .sn { r: 11px; } }
+  #pie .wl { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 0 18px; margin-top: 10px; }
+  #pie .wl .row { align-items: center; }
+  #pie .wl svg { width: 90px; height: 18px; flex: 0 0 auto; }
+  #pie .wl .row > :first-child { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #pie .wl .row > :last-child { flex: 0 0 auto; display: flex; gap: 8px; align-items: center; }
 
   /* the live map: a little dark universe, also in light mode */
   #pie .mapbox { position: relative; border-radius: 18px; overflow: hidden; margin: 0 -4px;
@@ -155,32 +183,6 @@
     return `<svg class="spark" viewBox="0 0 100 26" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
   }
 
-  // --- the pet's speech bubble: reacts to what is really going on ---
-  function say(d) {
-    const p = d.pi, pet = p?.pet, u = p?.untis || {}, o = d.oracle || {};
-    if (!pet) return "…";
-    const pick = arr => arr[Math.floor(Date.now() / 15000) % arr.length];  // changes every 15 s
-    if (pet.led?.what) return `✨ Ich ${pet.led.what === "herzklopfen" ? "hab Herzklopfen" : pet.led.what} …`;
-    if (pet.asleep) return pick(["Zzz… ich träume von MP3s 💤", "Zzz… *schnarch* … 512 MB RAM … zzz", "Pssst, ich schlafe. Um 6:08 gibt's Wetter ☀️", "Zzz… wer streichelt mich um diese Uhrzeit 🥱"]);
-    const cancel = (u.irregular || []).find(l => l.status === "CANCELLED" && (l.start.startsWith(day(0)) || l.start.startsWith(day(1))));
-    if (cancel) return `${cancel.start.startsWith(day(0)) ? "Heute" : "Morgen"} fällt ${cancel.subject} aus!! 🎉🎉`;
-    if (pet.food < 25) return pick(["Ich hab soooo Hunger 🥺 konvertier mal ein Video für mich", "Gib mir ein MP3 zu essen bitte 🎵🍴", "Mein Magen knurrt in Binärcode 01101000"]);
-    if (pet.love < 25) return pick(["Niemand streichelt mich 😢", "Hallo? Ist da wer? Streichel mich bitte 💜", "Ich fühl mich wie ein vergessener USB-Stick 🥲"]);
-    if ((p.cpu_temp || 0) > 60) return `Puh, ${num(p.cpu_temp, 0)} °C… mir ist heiß 🥵`;
-    if ((o.queue?.running || 0) > 0) return "Gerade fließt ein Video durch mich durch! 🎵➡️🦁";
-    const exam = (u.irregular || []).find(l => l.status === "EXAM");
-    return pick([
-      `Ich bin Level ${pet.level} und ${pet.age_days} ${pet.age_days === 1 ? "Tag" : "Tage"} alt 🍓`,
-      `Ich wurde schon ${pet.pets}× gestreichelt 💜`,
-      `Mir geht's gut: ${num(p.cpu_temp, 0)} °C und ${num(p.cpu, 0)} % CPU 😎`,
-      `Ich passe auf ${Object.keys(p.prismo?.sites || {}).length} Webseiten auf 🐕`,
-      exam ? `Psst: ${when(exam.start)} ist ${exam.subject} Prüfung 📝` : "Keine Prüfungen in Sicht. Chillig 😌",
-      `Schon ${num(o.totals?.videos, 0)} Videos konvertiert, und ich war bei vielen dabei 🎧`,
-      "Ich wohne in einer TicTac-Schachtel und bin stolz drauf 🍬",
-      `WLAN ${p.wifi ? p.wifi.dbm + " dBm" : "?"}: ${p.wifi?.dbm > -60 ? "Empfang ist top 📶" : "geht so 📶"}`,
-    ]);
-  }
-
   // --- screens ---
   function root() {
     let r = $p("pie");
@@ -231,38 +233,13 @@
     show(res.body);
   }
 
-  // --- the pet ---
-  function petView(d) {
-    const p = d.pi, pet = p?.pet;
-    if (!pet) return `<div class="face sleep"><span>💤</span></div><div><div class="name">PRISMO</div>
-      <div class="bubble">${p ? "Ich wache gerade auf…" : "Ich bin gerade offline. Stecker? WLAN? 🔌"}</div></div>`;
-    return `<div class="face ${pet.asleep ? "sleep" : ""}"><span>${pet.face}</span><div class="led ${pet.led?.what ? "on" : ""}" title="PRISMOs echtes Licht"></div></div>
-      <div style="min-width:0;width:100%">
-        <div class="name">PRISMO <small class="dim" style="font:600 14px system-ui">Level ${pet.level} · ${esc(pet.state)}</small></div>
-        <div class="bubble">${esc(say(d))}</div>
-        <div class="stats"><span>🍽️ Hunger</span>${bar(pet.food)}<span>💜 Liebe</span>${bar(pet.love)}</div>
-      </div>`;
-  }
-
-  function diary(d) {
-    const ev = d.pi?.pet?.events || [];
-    return ev.length ? `<ul style="margin-top:10px">${ev.slice(0, 5).map(e => `<li><small>${ago(e.at)}</small> · PRISMO ${esc(e.text)}</li>`).join("")}</ul>` : "";
-  }
-
-  function petCard(d) {
-    const pet = d.pi?.pet;
-    return `<section class="card wide">
-      <div class="pet" id="pie-pet">${petView(d)}</div>
-      <div class="actions">
-        <button data-a="pet">💜 Streicheln</button>
-        <button data-a="snack" id="pie-snack">🍪 Snack${pet ? ` (${pet.snacks_left})` : ""}</button>
-        <button data-a="wave" class="ghost">👋 Ins Zimmer winken</button>
-      </div>
+  // --- PRISMO's real green LED ---
+  function ledCard(d) {
+    return `<section class="card wide"><h2>💡 PRISMOs Licht <span class="led ${d.pi?.led?.what ? "on" : ""}" id="pie-led" title="das echte grüne Licht"></span>
+        <small>blinkt wirklich in deinem Zimmer</small></h2>
+      <div class="actions"><button data-a="heart">💓 Herzschlag</button><button data-a="wave" class="ghost">👋 Wild blinken</button></div>
       <form class="morse" id="pie-morse"><input maxlength="24" placeholder="Morse-Nachricht ans Zimmer…" autocomplete="off"><button type="submit">📡</button></form>
-      <div class="toast" id="pie-toast"></div>
-      <small>Das passiert wirklich: PRISMOs grünes Licht blinkt in deinem Zimmer. Futter = konvertierte Videos.</small>
-      <div id="pie-diary">${diary(d)}</div>
-    </section>`;
+      <div class="toast" id="pie-toast"></div></section>`;
   }
 
   async function act(action, text) {
@@ -281,12 +258,12 @@
     you: { x: 90, y: 70, e: "📱", l: "Du", c: "#ff74c8", r: 28 }, oracle: { x: 300, y: 62, e: "🦁", l: "Oracle", c: "#ffb547", r: 30 },
     yt: { x: 510, y: 70, e: "▶️", l: "YouTube", c: "#ff4d4d", r: 28 }, pi: { x: 300, y: 228, e: "🍓", l: "PRISMO", c: "#3dff9a", r: 40 },
     untis: { x: 90, y: 360, e: "📚", l: "WebUntis", c: "#5cc8ff", r: 28 }, ntfy: { x: 300, y: 382, e: "🔔", l: "ntfy", c: "#c58bff", r: 26 },
-    sites: { x: 510, y: 360, e: "🌐", l: "deine Seiten", c: "#38d6c4", r: 28 },
+    sites: { x: 510, y: 360, e: "🌐", l: "deine Seiten", c: "#38d6c4", r: 28 }, sky: { x: 528, y: 215, e: "✈️", l: "Himmel", c: "#7fb8ff", r: 26 },
   };
   // [from, to, bend]: packets fly from → to (rev = the other way)
   const LINKS = { yt_pi: ["yt", "pi", 40], pi_oracle: ["pi", "oracle", -30], oracle_you: ["oracle", "you", 26], pi_untis: ["pi", "untis", 30],
-    pi_ntfy: ["pi", "ntfy", -18], ntfy_you: ["ntfy", "you", -120], pi_sites: ["pi", "sites", -30] };
-  const ms = { rates: {}, burst: [], down: {}, led: false, io: false, temp: 45, cpu: 0, lastVideos: null, lastPush: null, tip: "pi", d: null };
+    pi_ntfy: ["pi", "ntfy", -18], ntfy_you: ["ntfy", "you", -120], pi_sites: ["pi", "sites", -30], sky_pi: ["sky", "pi", 22] };
+  const ms = { rates: {}, burst: [], down: {}, led: false, io: false, temp: 45, cpu: 0, lastVideos: null, lastPush: null, lastPlanes: null, tip: "pi", d: null };
   let raf = 0, lastT = 0, pkts = [];
 
   function linkPath([a, b, bend]) {
@@ -369,6 +346,8 @@
       const on = ms.led ? (t % 260) < 130 : !(ms.io && Math.random() < .5);
       led.setAttribute("fill", on ? "#3dff9a" : "#1b4d2f"); led.setAttribute("opacity", ms.down.pi_oracle ? ".2" : "1");
     }
+    radarFrame();
+    watchFrame(dt);
     raf = requestAnimationFrame(frame);
   }
 
@@ -386,7 +365,8 @@
       pi: p ? `<b>🍓 PRISMO</b>: ${num(p.cpu_temp)} °C, ${num(p.cpu, 0)} % CPU, läuft seit ${dur(p.uptime)}. Das kleine Licht oben ist sein echtes grünes Licht.` : `<b>🍓 PRISMO</b> ist offline.`,
       untis: `<b>📚 WebUntis</b>: PRISMO schaut alle 5 Minuten für ${esc(p?.untis?.class || "?")} nach, zuletzt ${isoAgo(p?.untis?.checked)}.`,
       ntfy: `<b>🔔 ntfy</b> bringt PRISMOs Nachrichten auf dein Handy. Zuletzt: ${esc((p?.untis?.pushes || [])[0]?.title || "noch nichts")}.`,
-      sites: `<b>🌐 Wachhund</b>: ${sites.map(([n, x]) => (x.ok ? "✅ " : "🚨 ") + esc(n)).join(" · ") || "startet gleich"}.`,
+      sites: `<b>🌐 Wachhund</b>: PRISMO pingt ${sites.length} Seiten, alle paar Sekunden eine. ${sites.filter(([, x]) => !x.ok).map(([n]) => "🚨 " + esc(n)).join(" · ") || "Alle online ✅"}`,
+      sky: `<b>✈️ Himmel</b>: ${p?.planes?.list?.length ?? 0} Flugzeuge im Umkreis von ${num(p?.planes?.radius, 0)} km, heute schon ${p?.planes?.today ?? 0} gesehen. Echte Positionen von Hobby-Funkempfängern (adsb.lol).`,
     }[k];
   }
 
@@ -396,7 +376,6 @@
     const rx = p?.net?.rx || 0, tx = p?.net?.tx || 0, conv = (o.queue?.running || 0) + (o.queue?.waiting || 0);
     const checked = p?.untis?.checked ? now - new Date(p.untis.checked).getTime() / 1000 : 1e9;
     const sites = Object.values(p?.prismo?.sites || {}), down = sites.filter(s => s.down_since).length;
-    const siteAge = sites.length ? now - Math.max(...sites.map(s => s.checked || 0)) : 1e9;
     ms.rates = {
       // a small baseline (tailscale, watchdog and proxy really do chatter all the time) + the real traffic on top
       yt_pi: Math.min(10, .7 + rx / 20e3 + conv * 3),
@@ -404,12 +383,12 @@
       oracle_you: Math.min(10, .25 + (o.active || 0) * .8 + conv * 3),
       pi_untis: checked < 12 ? [6, 6] : [.12, .12],
       pi_ntfy: .05, ntfy_you: .05,
-      pi_sites: siteAge < 8 ? [5, 5] : [.35, .35],
+      pi_sites: [.2, .2], sky_pi: .15,
     };
     const off = !p;
-    ms.down = { yt_pi: off, pi_oracle: off, pi_untis: off, pi_ntfy: off, pi_sites: off || down > 0 };
+    ms.down = { yt_pi: off, pi_oracle: off, pi_untis: off, pi_ntfy: off, pi_sites: off || down > 0, sky_pi: off || !p?.planes?.at };
     Object.keys(LINKS).forEach(k => $p("pie-w-" + k)?.classList.toggle("down", !!ms.down[k]));
-    ms.led = !!p?.pet?.led?.what;
+    ms.led = !!p?.led?.what;
     ms.io = (p?.io?.read || 0) + (p?.io?.write || 0) > 0;
     // events → bursts
     const videos = o.totals?.videos;
@@ -421,6 +400,9 @@
     const push = (p?.untis?.pushes || [])[0]?.at;
     if (ms.lastPush != null && push && push !== ms.lastPush) { burst([["pi_ntfy"], ["ntfy_you"]], 10); flash("🔔 PRISMO hat dir was geschickt"); }
     if (push) ms.lastPush = push;
+    const pat = p?.planes?.at;
+    if (ms.lastPlanes != null && pat && pat !== ms.lastPlanes) burst([["sky_pi"]], 3);
+    if (pat) ms.lastPlanes = pat;
     // PRISMO's ring: length = cpu, colour = temperature (cool cyan → hot red)
     const ring = $p("pie-ring");
     if (ring && p) {
@@ -431,10 +413,11 @@
     setVal("you", `${o.active ?? 0} online`);
     setVal("oracle", conv ? `${conv} in Arbeit` : `${num(o.cpu, 0)} % CPU`);
     setVal("yt", rx > 20e3 ? "↓ " + rate(rx) : "ruhig");
-    setVal("pi", p ? `${num(p.cpu_temp, 0)} °C · ${num(p.cpu, 0)} % · ${p.pet?.face || ""}` : "offline", !p);
+    setVal("pi", p ? `${num(p.cpu_temp, 0)} °C · ${num(p.cpu, 0)} %` : "offline", !p);
     setVal("untis", p?.untis?.class ? `${p.untis.class} · ${isoAgo(p.untis.checked)}` : "");
     setVal("ntfy", (p?.untis?.pushes || [])[0] ? isoAgo(p.untis.pushes[0].at) : "");
     setVal("sites", sites.length ? (down ? `${down} offline!` : `${sites.length} online`) : "", down > 0);
+    setVal("sky", p?.planes?.at ? `${p.planes.list.length} Flugzeuge` : "", !p?.planes?.at);
     const tip = $p("pie-tip"); if (tip) tip.innerHTML = tipText(ms.tip, d) || "";
     if (!raf) { lastT = 0; raf = requestAnimationFrame(frame); }
   }
@@ -447,6 +430,190 @@
       Object.entries(LINKS).forEach(([key, [a, b]]) => { if (a === k) burst([[key]], 5); else if (b === k) burst([[key, true]], 5); });
       if (ms.d) $p("pie-tip").innerHTML = tipText(k, ms.d);
     });
+  }
+
+  // --- the plane radar: real planes around PRISMO. the page only ever gets km east/north of home ---
+  const R = { r: 182, radius: 50, data: null, recv: 0, lag: 0, sel: null, els: {}, trails: {}, lastOver: null, lastAt: 0 };
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs = {}) => { const e = document.createElementNS(SVGNS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+  const altColor = a => `hsl(${(28 + 165 * Math.min(1, (a || 0) / 12000)).toFixed(0)} 95% 62%)`;
+  const compass = deg => ["N", "NO", "O", "SO", "S", "SW", "W", "NW"][Math.round(((deg % 360) + 360) % 360 / 45) % 8];
+  const PLANE = "M0,-9 L1.4,-3 L8,1.2 L8,3 L1.4,1.4 L1,6 L3.4,8 L3.4,9.2 L0,8.4 L-3.4,9.2 L-3.4,8 L-1,6 L-1.4,1.4 L-8,3 L-8,1.2 L-1.4,-3 Z";
+
+  function radarSvg() {
+    let sweep = "";
+    for (let i = 0; i < 8; i++) {  // a fading wedge behind the sweep line
+      const a0 = (-i * 5) * Math.PI / 180, a1 = (-(i + 1) * 5) * Math.PI / 180;
+      sweep += `<path d="M200,200 L${(200 + 190 * Math.sin(a0)).toFixed(1)},${(200 - 190 * Math.cos(a0)).toFixed(1)} A190,190 0 0,0 ${(200 + 190 * Math.sin(a1)).toFixed(1)},${(200 - 190 * Math.cos(a1)).toFixed(1)} Z" fill="#38d6c4" opacity="${(.22 - i * .026).toFixed(3)}"/>`;
+    }
+    return `<div class="radarbox"><div class="flash" id="pie-rflash"></div>
+      <svg class="radar" id="pie-radar" viewBox="0 0 400 400" role="img" aria-label="Flugzeug-Radar um PRISMO">
+        <g id="pie-rgrid"></g>
+        <g class="sweep">${sweep}<line x1="200" y1="200" x2="200" y2="10" stroke="#7ff0e2" stroke-width="1.5" opacity=".8"/></g>
+        <g id="pie-rtr"></g><g id="pie-rpl"></g>
+        <circle cx="200" cy="200" r="5" fill="#ff74c8"/><circle cx="200" cy="200" r="11" fill="none" stroke="#ff74c8" stroke-width="1" opacity=".6"/>
+      </svg><div class="rinfo" id="pie-rinfo">Radar startet…</div><div class="plist" id="pie-plist"></div></div>`;
+  }
+
+  function radarGrid(radius) {
+    const g = $p("pie-rgrid"); if (!g) return;
+    const rings = radius > 40 ? [10, 25, radius] : [5, 10, radius];
+    g.innerHTML = rings.map(k => { const r = R.r * k / radius;
+      return `<circle class="rg" cx="200" cy="200" r="${r.toFixed(1)}"/><text class="rl" x="${(200 + r * .72).toFixed(1)}" y="${(200 - r * .7).toFixed(1)}">${k} km</text>`; }).join("")
+      + `<line class="rx" x1="200" y1="${200 - R.r}" x2="200" y2="${200 + R.r}"/><line class="rx" x1="${200 - R.r}" y1="200" x2="${200 + R.r}" y2="200"/>`
+      + [["N", 200, 200 - R.r - 6], ["S", 200, 200 + R.r + 14], ["O", 200 + R.r + 8, 204], ["W", 200 - R.r - 8, 204]].map(([t, x, y]) => `<text class="cd" x="${x}" y="${y}">${t}</text>`).join("")
+      + `<text class="rl" x="200" y="222" text-anchor="middle">🏠 PRISMO</text>`;
+  }
+
+  // where a plane is right now: its last report + speed × time since then
+  function planeNow(p) {
+    const t = Math.min(40, (performance.now() - R.recv) / 1000 + R.lag + (p.age || 0)), v = (p.speed || 0) / 3600, a = (p.track || 0) * Math.PI / 180;
+    return { x: p.x + v * Math.sin(a) * t, y: p.y + v * Math.cos(a) * t };
+  }
+  const planeName = p => [p.airline, p.iata || p.cs].filter(Boolean).join(" ") || p.cs || p.reg || p.id;
+
+  function planeInfo(p) {
+    if (!p) return R.data?.error ? `Radar hat gerade keine Daten (${esc(R.data.error)})` : R.data?.list?.length === 0 ? "Gerade ist kein Flugzeug in der Nähe. Ruhiger Himmel 🌌" : "Tipp auf ein Flugzeug ✈️";
+    const pos = planeNow(p), dist = Math.hypot(pos.x, pos.y), dir = compass(Math.atan2(pos.x, pos.y) * 180 / Math.PI);
+    const climb = p.ground ? "am Boden" : p.climb > 1.5 ? "↗ steigt" : p.climb < -1.5 ? "↘ sinkt" : "→ Reiseflug";
+    const route = p.from && p.to ? `${esc(p.from)} → ${esc(p.to)}` : "Route unbekannt";
+    return `<b>✈️ ${esc(planeName(p))}</b> · ${route}<br><small>${esc(p.type || "?")}${p.reg ? " · " + esc(p.reg) : ""} · <b>${num(p.alt, 0)} m</b> · ${num(p.speed, 0)} km/h · ${climb} · ${num(dist)} km ${dir}</small>`;
+  }
+
+  function radarData(d) {
+    const pl = d.pi?.planes; if (!pl || !$p("pie-radar")) return;
+    if (pl.radius !== R.radius || !$p("pie-rgrid").childNodes.length) { R.radius = pl.radius || 50; radarGrid(R.radius); }
+    if (pl.at !== R.lastAt) {
+      R.lastAt = pl.at; R.recv = performance.now(); R.lag = Math.max(0, (d.pi.time || pl.at) - pl.at);
+      R.data = pl;
+      const seen = new Set();
+      for (const p of pl.list) {
+        seen.add(p.id);
+        const tr = R.trails[p.id] || (R.trails[p.id] = []);
+        tr.push([p.x, p.y]); if (tr.length > 24) tr.shift();
+        if (!R.els[p.id]) {
+          const g = el("g", { class: "pl" }), body = el("g"), hit = el("circle", { r: 14, fill: "#fff", opacity: 0 }), ring = el("circle", { r: 13, fill: "none", stroke: "#fff", "stroke-width": 1.5, class: "selr" });
+          const glyph = el("path", { d: PLANE, class: "gl" }), t1 = el("text", { x: 11, y: -3 }), t2 = el("text", { x: 11, y: 9, class: "a" });
+          const trail = el("polyline", { class: "tr" });
+          body.append(glyph); g.append(hit, ring, body, t1, t2);
+          g.onclick = () => { R.sel = p.id; radarList(); $p("pie-rinfo").innerHTML = planeInfo(R.data.list.find(x => x.id === R.sel)); };
+          $p("pie-rpl").append(g); $p("pie-rtr").append(trail);
+          R.els[p.id] = { g, body, glyph, t1, t2, trail };
+        }
+        const e = R.els[p.id], c = altColor(p.alt);
+        e.glyph.setAttribute("fill", c); e.trail.setAttribute("stroke", c);
+        e.t1.textContent = p.iata || p.cs || p.reg || ""; e.t2.textContent = p.ground ? "Boden" : (p.alt / 1000).toLocaleString("de-AT", { maximumFractionDigits: 1 }) + " km";
+        e.p = p;
+      }
+      for (const id of Object.keys(R.els)) if (!seen.has(id)) { R.els[id].g.remove(); R.els[id].trail.remove(); delete R.els[id]; delete R.trails[id]; }
+      if (!R.sel || !seen.has(R.sel)) R.sel = pl.list[0]?.id || null;
+      radarList();
+      if (pl.overhead && pl.overhead.at !== R.lastOver) {
+        if (R.lastOver !== null) { const f = $p("pie-rflash"); if (f) { f.textContent = `✈️ ${planeName(pl.overhead)} fliegt gerade über dich!`; f.classList.add("on"); setTimeout(() => f.classList.remove("on"), 6000); } }
+        R.lastOver = pl.overhead.at;
+      } else if (R.lastOver === null) R.lastOver = pl.overhead?.at || 0;
+    }
+    $p("pie-rinfo").innerHTML = planeInfo(R.data?.list.find(x => x.id === R.sel));
+  }
+
+  function radarList() {
+    const box = $p("pie-plist"); if (!box || !R.data) return;
+    box.innerHTML = R.data.list.slice(0, 8).map(p => `<button data-id="${esc(p.id)}" class="${p.id === R.sel ? "sel" : ""}">✈️ <b>${esc(p.iata || p.cs || p.reg || "?")}</b> ${p.from_code && p.to_code ? esc(p.from_code) + "→" + esc(p.to_code) : ""} · ${num(p.alt / 1000)} km · ${num(p.dist, 0)} km weg</button>`).join("")
+      + `<div class="dim" style="align-self:center;font-size:12.5px;color:#8fb7ba">${R.data.list.length} in ${num(R.data.radius, 0)} km · heute ${R.data.today} gesehen</div>`;
+    box.querySelectorAll("button").forEach(b => b.onclick = () => { R.sel = b.dataset.id; radarList(); $p("pie-rinfo").innerHTML = planeInfo(R.data.list.find(x => x.id === R.sel)); });
+  }
+
+  function radarFrame() {
+    if (!R.data || !$p("pie-radar")) return;
+    const k = R.r / R.radius;
+    for (const [id, e] of Object.entries(R.els)) {
+      const p = e.p, pos = planeNow(p), x = 200 + pos.x * k, y = 200 - pos.y * k;
+      const out = Math.hypot(x - 200, y - 200) > R.r + 4;
+      e.g.style.display = out ? "none" : "";
+      e.g.setAttribute("transform", `translate(${x.toFixed(1)},${y.toFixed(1)})`);
+      e.body.setAttribute("transform", `rotate(${p.track || 0})`);
+      e.g.classList.toggle("sel", id === R.sel);
+      const tr = R.trails[id] || [];
+      e.trail.setAttribute("points", tr.map(([tx, ty]) => `${(200 + tx * k).toFixed(1)},${(200 - ty * k).toFixed(1)}`).concat(out ? [] : [`${x.toFixed(1)},${y.toFixed(1)}`]).join(" "));
+    }
+  }
+
+  // --- watchdog live: every ping PRISMO sends to one of the sites flies out and back ---
+  const W = { key: "", pos: {}, last: {}, pk: [] };
+  const msText = s => s == null ? "" : s < 0 ? "Fehler" : s < 1 ? Math.round(s * 1000) + " ms" : num(s, 1) + " s";
+
+  function watchBuild(names) {
+    const box = $p("pie-watch"); if (!box) return;
+    W.key = names.join("|"); W.pos = {}; W.pk = [];
+    const n = names.length, cx = 300, cy = 160, rx = 172, ry = 112;
+    let svg = "";
+    names.forEach((name, i) => {
+      const a = -Math.PI / 2 + i * 2 * Math.PI / n, x = cx + rx * Math.cos(a), y = cy + ry * Math.sin(a);
+      W.pos[name] = { x, y };
+      const side = Math.cos(a), anchor = side > .3 ? "start" : side < -.3 ? "end" : "middle", lx = x + side * 14, ly = y + (Math.abs(side) <= .3 ? (Math.sin(a) > 0 ? 24 : -16) : 0);
+      const max = innerWidth < 520 ? 11 : 16, short = name.length > max ? name.slice(0, max - 1) + "…" : name;
+      svg += `<line class="sp" x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}"/>
+        <circle class="sn" id="pie-sn-${i}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="9"/>
+        <text x="${lx.toFixed(1)}" y="${(ly + 1).toFixed(1)}" text-anchor="${anchor}">${esc(short)}</text>
+        <text class="ms" id="pie-sm-${i}" x="${lx.toFixed(1)}" y="${(ly + 15).toFixed(1)}" text-anchor="${anchor}"></text>`;
+    });
+    box.innerHTML = `<svg class="watch" viewBox="0 0 600 320" role="img" aria-label="Wachhund live">${svg}<g id="pie-wpk"></g>
+      <circle cx="${cx}" cy="${cy}" r="30" fill="rgba(255,255,255,.06)" stroke="#3dff9a" stroke-width="2" filter="url(#pie-glow)"/>
+      <text x="${cx}" y="${cy + 10}" text-anchor="middle" style="font-size:28px">🐕</text></svg>`;
+  }
+
+  function watchPacket(x0, y0, x1, y1, dur, color, then) {
+    const g = $p("pie-wpk"); if (!g) return;
+    const glow = el("circle", { r: 6, fill: color, opacity: .4 }), dot = el("circle", { r: 3, fill: "#fff" });
+    g.append(glow, dot);
+    W.pk.push({ x0, y0, x1, y1, dur, t: 0, glow, dot, then });
+  }
+
+  function watchFrame(dt) {
+    W.pk = W.pk.filter(p => {
+      p.t += dt / p.dur;
+      const f = Math.min(1, p.t), e = f < .5 ? 2 * f * f : 1 - (-2 * f + 2) ** 2 / 2, x = p.x0 + (p.x1 - p.x0) * e, y = p.y0 + (p.y1 - p.y0) * e;
+      p.dot.setAttribute("cx", x.toFixed(1)); p.dot.setAttribute("cy", y.toFixed(1)); p.glow.setAttribute("cx", x.toFixed(1)); p.glow.setAttribute("cy", y.toFixed(1));
+      if (p.t >= 1) { p.dot.remove(); p.glow.remove(); p.then?.(); return false; }
+      return true;
+    });
+  }
+
+  function wspark(h) {
+    if (!h?.length) return `<svg></svg>`;
+    const ok = h.filter(v => v >= 0), max = Math.max(.3, ...ok), step = 90 / 29, off = 90 - (h.length - 1) * step;
+    const pts = h.map((v, i) => `${(off + i * step).toFixed(1)},${(17 - 15 * Math.min(1, Math.max(0, v) / max)).toFixed(1)}`).join(" ");
+    const bad = h.map((v, i) => v < 0 ? `<circle cx="${(off + i * step).toFixed(1)}" cy="9" r="2.4" fill="#ff4d7a"/>` : "").join("");
+    return `<svg viewBox="0 0 90 18" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="#38d6c4" stroke-width="1.6" vector-effect="non-scaling-stroke"/>${bad}</svg>`;
+  }
+
+  function watchData(d, list) {
+    const sites = d.pi?.prismo?.sites || {}, names = Object.keys(sites);
+    if (!$p("pie-watch")) return;
+    if (!names.length) { $p("pie-watch").innerHTML = `<p class="dim" style="padding:16px">${d.pi ? "Wachhund startet gleich" : "PRISMO ist offline"}</p>`; W.key = ""; return; }
+    if (names.join("|") !== W.key) watchBuild(names);
+    const cx = 300, cy = 160;
+    names.forEach((name, i) => {
+      const s = sites[name], node = $p("pie-sn-" + i), pos = W.pos[name];
+      if (!node) return;
+      node.classList.toggle("ok", !!s.ok); node.classList.toggle("bad", s.ok === false);
+      const fresh = W.last[name] != null && s.checked > W.last[name];
+      if (W.last[name] == null) $p("pie-sm-" + i).textContent = msText(s.ok ? s.took : -1);
+      if (fresh) {
+        const color = s.ok ? "#3dff9a" : "#ff4d7a";
+        watchPacket(cx, cy, pos.x, pos.y, .5, "#9f8cff", () => {
+          node.classList.add("ping"); setTimeout(() => node.classList.remove("ping"), 250);
+          $p("pie-sm-" + i).textContent = msText(s.ok ? s.took : -1);
+          watchPacket(pos.x, pos.y, cx, cy, .35 + Math.min(2.5, s.took || 0), color);
+        });
+        spawn("pi_sites"); setTimeout(() => spawn("pi_sites", true, s.ok ? "#3dff9a" : "#ff4d7a"), 400 + Math.min(2500, (s.took || 0) * 1000));
+      }
+      W.last[name] = s.checked;
+    });
+    if (list) {
+      $p("pie-wlist").innerHTML = names.map(name => { const s = sites[name], up = s.n ? 100 * s.n_ok / s.n : null;
+        return `<div class="row"><span>${s.ok ? "✅" : s.down_since ? "🚨" : "⚠️"} ${esc(name)}</span><span>${wspark(s.hist)}<small>${msText(s.ok ? s.took : -1)}</small>${up == null ? "" : `<small class="${up > 99 ? "ok" : up > 90 ? "meh" : "bad"}">${num(up, up > 99.9 ? 0 : 1)} %</small>`}</span></div>`; }).join("");
+    }
   }
 
   // --- live meters ---
@@ -520,10 +687,6 @@
         + (u.irregular?.length ? `<ul>${u.irregular.slice(0, 6).map(l => `<li>${ICON[l.status] || "•"} ${esc(when(l.start))} ${esc(l.subject)}</li>`).join("")}</ul>` : `<p class="dim">nichts Besonderes</p>`)
         : `<p class="dim">wohnt auf PRISMO</p>`}
     </section>
-    <section class="card"><h2>🐕 Wachhund</h2>
-      ${sites.length ? sites.map(([n, x]) => row(esc(n), x.ok ? `<span class="ok">online</span> <small>${num(x.took, 2)} s</small>` : `<span class="bad">${x.down_since ? "offline seit " + dur(Date.now() / 1000 - x.down_since) : "wackelt"}</span>`)).join("") : `<p class="dim">${p ? "startet gleich" : "wohnt auf PRISMO"}</p>`}
-      <small>PRISMO selbst wird von Oracle bewacht 🦁</small>
-    </section>
     <section class="card"><h2>☀️ Morgen-Briefing <small>Mo–Fr 6:08</small></h2>
       ${p?.prismo?.briefing ? `<small>${isoAgo(p.prismo.briefing.at)}</small><p style="white-space:pre-line;margin:6px 0 0">${esc(p.prismo.briefing.text)}</p>` : `<p class="dim">Das erste kommt um 6:08 🌅</p>`}
     </section>
@@ -551,10 +714,12 @@
     root().innerHTML = `<div class="wrap">
       <header class="head"><div class="logo">prismo<small>fabios kleiner helfer</small></div>
         <div><span class="live"><i></i>live</span> <button class="ghost" type="button" data-x style="margin-left:8px">✕</button></div></header>
-      ${petCard(d)}
       <div class="grid">
         <section class="card wide"><h2>🗺️ PRISMO-Netz <small>live · tipp auf einen Punkt</small></h2>${mapSvg()}</section>
+        <section class="card wide"><h2>✈️ Über PRISMO <small>echte Flugzeuge, live · tipp drauf</small></h2>${radarSvg()}</section>
+        <section class="card wide"><h2>🐕 Wachhund live <small>jeder Punkt ist ein echter Ping</small></h2><div class="watchbox" id="pie-watch"></div><div class="wl" id="pie-wlist"></div></section>
         <section class="card wide"><h2>⚡ Live</h2><div id="pie-meters">${meters(d)}</div></section>
+        ${ledCard(d)}
         <section class="card wide"><h2>📈 Die letzten 24 Stunden</h2><div id="pie-chart">${chart()}</div></section>
       </div>
       <div class="grid" id="pie-cards">${cards(d)}</div>
@@ -564,8 +729,11 @@
     r.querySelector("[data-x]").onclick = close;
     r.querySelectorAll("[data-a]").forEach(b => b.onclick = () => act(b.dataset.a));
     $p("pie-morse").onsubmit = e => { e.preventDefault(); const i = e.target.querySelector("input"); if (i.value.trim()) { act("morse", i.value.trim()); i.value = ""; } };
+    R.els = {}; R.trails = {}; R.lastAt = 0; W.key = ""; W.last = {};
     updateMap(d);
     bindMap();
+    radarData(d);
+    watchData(d, true);
     clearInterval(timer);
     tick = 0;
     timer = setInterval(() => { tick++; refresh(tick % 5 === 0, tick % 60 === 0); }, 1000);
@@ -581,15 +749,11 @@
       const d = res.body;
       record(d);
       updateMap(d);
+      radarData(d);
+      watchData(d, all);
       $p("pie-meters").innerHTML = meters(d);
-      if (all) {
-        $p("pie-pet").innerHTML = petView(d);
-        $p("pie-diary").innerHTML = diary(d);
-        const sn = $p("pie-snack"); if (sn && d.pi?.pet) sn.textContent = `🍪 Snack (${d.pi.pet.snacks_left})`;
-        $p("pie-cards").innerHTML = cards(d);
-      } else {
-        const led = $p("pie").querySelector(".face .led"); if (led) led.classList.toggle("on", !!d.pi?.pet?.led?.what);
-      }
+      $p("pie-led")?.classList.toggle("on", !!d.pi?.led?.what);
+      if (all) $p("pie-cards").innerHTML = cards(d);
       if (full) $p("pie-chart").innerHTML = chart();
     } catch {} finally { busy = false; }
   }
