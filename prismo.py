@@ -7,7 +7,7 @@
 
 config.json next to this file (not in the repo):
   {"place": "Zuhause", "lat": 48.0, "lon": 14.3,
-   "sites": [{"name": "ytmp34", "url": "https://.../ping"}, {"name": "faight", "url": "...", "every": 5, "timeout": 90}]}
+   "sites": [{"name": "ytmp34", "url": "https://.../ping"}, {"name": "faight", "url": "...", "every": 60, "timeout": 120, "fails": 2}]}
 """
 import datetime as dt
 import json
@@ -184,7 +184,7 @@ def watchdog():
     minute = int(time.time() // 60)
     for site in cfg.get("sites", []):
         if minute % site.get("every", 1):
-            continue  # slow sites (render wakes up slowly) only every few minutes
+            continue  # render apps only hourly: every check wakes them for 15 min and render's free plan has 750 h/month
         s = sites.setdefault(site["name"], {"fails": 0})
         ok, took, err = check(site)
         now = time.time()
@@ -196,8 +196,9 @@ def watchdog():
             s.update(fails=0, down_since=None, last_ok=now)
         else:
             s["fails"] = s.get("fails", 0) + 1
-            if s["fails"] == FAILS_BEFORE_ALERT:
-                s["down_since"] = now - 60 * site.get("every", 1) * (FAILS_BEFORE_ALERT - 1)
+            need = site.get("fails", FAILS_BEFORE_ALERT)
+            if s["fails"] == need:
+                s["down_since"] = now - 60 * site.get("every", 1) * (need - 1)
                 push(f"🚨 {site['name']} ist offline!", f"{site['url']}\n{err or 'antwortet nicht'}", urgent=True, tags=["rotating_light"])
     save(STATE, state)
 
