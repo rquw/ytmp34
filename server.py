@@ -139,7 +139,7 @@ def notify(title, msg):
         return
     for topic in topics:
         try:
-            body = json.dumps({"topic": topic, "title": title, "message": msg}).encode()
+            body = json.dumps({"topic": topic, "title": title, "message": msg, "priority": 5}).encode()  # always max: shows on top
             req = urllib.request.Request("https://ntfy.sh", data=body, headers={"Content-Type": "application/json"})
             urllib.request.urlopen(req, timeout=10)
         except Exception as e:

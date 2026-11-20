@@ -57,7 +57,7 @@ def get_json(url, timeout=20):
 
 def push(title, message, urgent=False, tags=None):
     cfg = load(os.path.join(UNTIS, "config.json"), {})
-    body = {"topic": cfg["topic"], "title": title, "message": message, "priority": 5 if urgent else 3, "tags": tags or []}
+    body = {"topic": cfg["topic"], "title": title, "message": message, "priority": 5, "tags": tags or []}
     req = urllib.request.Request(cfg.get("ntfy", "https://ntfy.sh"), json.dumps(body).encode(), {"Content-Type": "application/json"})
     urllib.request.urlopen(req, timeout=20).read()
     # same log as the untis watcher, so pie mode shows these too
