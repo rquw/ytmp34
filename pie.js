@@ -153,6 +153,29 @@
   #pie .gate input { font: 800 34px "Baloo 2", monospace; width: 180px; text-align: center; letter-spacing: 12px; border: 2px solid var(--line);
     border-radius: 18px; padding: 6px; margin: 16px 0; background: transparent; color: var(--ink); }
   #pie .err { color: var(--bad); min-height: 1.4em; margin-top: 10px; font-weight: 600; }
+  /* PRISMO offline: full alarm. calms down the second it's back */
+  #pie .alarmbar { display: none; position: sticky; top: 0; z-index: 6; margin: 0 -16px 12px; padding: 12px 16px 10px; text-align: center; color: #fff;
+    font: 800 24px/1.1 "Baloo 2", system-ui, sans-serif; letter-spacing: 1px; text-shadow: 0 2px 0 #5a0012, 0 0 18px #ff0033;
+    background: repeating-linear-gradient(45deg, #ff1744 0 22px, #9a0024 22px 44px); background-size: 62.2px 62.2px;
+    animation: pie-stripes .5s linear infinite; box-shadow: 0 6px 30px rgba(255,0,50,.6); }
+  #pie .alarmbar div { animation: pie-blink .45s steps(1) infinite; }
+  #pie .alarmbar small { display: block; margin-top: 4px; font: 700 14px system-ui, sans-serif; letter-spacing: 0; color: #ffe1e6; }
+  #pie.alarm .alarmbar { display: block; }
+  #pie.alarm::before { content: ""; position: fixed; inset: 0; z-index: 5; pointer-events: none; box-shadow: inset 0 0 140px 50px rgba(255,0,40,.8);
+    animation: pie-redpulse .7s ease-in-out infinite; }
+  #pie.alarm .wrap { animation: pie-shake 3s infinite; }
+  #pie.alarm .logo { animation: pie-blink .35s steps(1) infinite; text-shadow: -2px -2px 0 #ff1744, 2px -2px 0 #ff1744, -2px 2px 0 #ff1744, 2px 2px 0 #ff1744, 0 0 22px #ff0033; }
+  #pie.alarm .card { border-color: rgba(255,23,68,.7); box-shadow: 0 0 0 1px rgba(255,23,68,.4), 0 10px 40px rgba(255,0,50,.25); }
+  #pie.alarm .mapbox, #pie.alarm .radarbox, #pie.alarm .watchbox { filter: grayscale(.85) brightness(.7); }
+  #pie .okbar { display: none; margin: 0 -16px 12px; padding: 12px 16px; text-align: center; color: #fff; font: 800 22px "Baloo 2", system-ui, sans-serif;
+    background: linear-gradient(90deg, #0fa968, #2ad38b); box-shadow: 0 6px 30px rgba(20,200,120,.45); }
+  #pie .okbar.on { display: block; animation: pie-calm 6s ease forwards; }
+  @keyframes pie-stripes { to { background-position: 62.2px 0; } }
+  @keyframes pie-blink { 50% { opacity: .35; } }
+  @keyframes pie-redpulse { 50% { box-shadow: inset 0 0 60px 12px rgba(255,0,40,.35); } }
+  @keyframes pie-shake { 0%, 14%, 100% { transform: none; } 2% { transform: translate(-7px, 2px) rotate(-.5deg); } 4% { transform: translate(7px, -2px) rotate(.5deg); }
+    6% { transform: translate(-5px, -1px) rotate(-.3deg); } 8% { transform: translate(5px, 1px) rotate(.3deg); } 10% { transform: translate(-2px, 0); } 12% { transform: translate(2px, 0); } }
+  @keyframes pie-calm { 0% { transform: scale(1.04); opacity: 0; } 8%, 80% { transform: none; opacity: 1; } 100% { opacity: 0; } }
   @media (prefers-reduced-motion: reduce) { #pie * { animation: none !important; } }
   `;
 
@@ -196,7 +219,39 @@
     return r;
   }
 
+  // --- the offline alarm: 3 missed polls in a row (a wifi hiccup isn't an outage), gone on the first answer ---
+  const A = { miss: 0, since: null, on: false, title: null };
+  function siren() {
+    try {
+      const ac = new (window.AudioContext || window.webkitAudioContext)(), o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime;
+      o.type = "sawtooth"; g.gain.value = .05; o.connect(g).connect(ac.destination);
+      for (let i = 0; i < 4; i++) { o.frequency.setValueAtTime(620, t + i * .6); o.frequency.linearRampToValueAtTime(1180, t + i * .6 + .3); o.frequency.linearRampToValueAtTime(620, t + i * .6 + .6); }
+      g.gain.setValueAtTime(.05, t + 2.2); g.gain.linearRampToValueAtTime(0, t + 2.4);
+      o.start(t); o.stop(t + 2.45); o.onended = () => ac.close();
+    } catch {}
+  }
+  function alarm(d) {
+    const r = $p("pie"); if (!r || !$p("pie-alarm")) return;
+    if (d.pi) {
+      A.miss = 0; A.since = null;
+      if (A.on) {
+        A.on = false; r.classList.remove("alarm"); document.title = A.title;
+        const ok = $p("pie-okbar"); ok.classList.remove("on"); void ok.offsetWidth; ok.classList.add("on");
+        clearTimeout(alarm.t); alarm.t = setTimeout(() => ok.classList.remove("on"), 6000);
+      }
+      return;
+    }
+    A.miss++; A.since ??= Date.now();
+    if (A.miss >= 3 && !A.on) { A.on = true; A.title = document.title; r.classList.add("alarm"); $p("pie-okbar").classList.remove("on"); siren(); }
+    if (A.on) {
+      $p("pie-alarmtxt").textContent = `kein Lebenszeichen seit ${dur((Date.now() - A.since) / 1000)} · Stecker? WLAN? Mama? 🔌`;
+      document.title = (Math.floor(Date.now() / 1000) % 2 ? "🚨🚨 " : "⚠️ ") + "PRISMO OFFLINE";
+    }
+  }
+
   function close() {
+    if (A.on) document.title = A.title;
+    A.on = false; A.miss = 0; A.since = null;
     clearInterval(timer);
     $p("pie")?.remove();
     document.documentElement.style.overflow = "";
@@ -714,6 +769,8 @@
     root().innerHTML = `<div class="wrap">
       <header class="head"><div class="logo">prismo<small>fabios kleiner helfer</small></div>
         <div><span class="live"><i></i>live</span> <button class="ghost" type="button" data-x style="margin-left:8px">✕</button></div></header>
+      <div class="alarmbar" id="pie-alarm" role="alert"><div>🚨 ALARM: PRISMO IST OFFLINE 🚨</div><small id="pie-alarmtxt"></small></div>
+      <div class="okbar" id="pie-okbar" role="status">✅ PRISMO ist wieder da. Alles stabil 💚</div>
       <div class="grid">
         <section class="card wide"><h2>🗺️ PRISMO-Netz <small>live · tipp auf einen Punkt</small></h2>${mapSvg()}</section>
         <section class="card wide"><h2>✈️ Über PRISMO <small>echte Flugzeuge, live · tipp drauf</small></h2>${radarSvg()}</section>
@@ -730,6 +787,8 @@
     r.querySelectorAll("[data-a]").forEach(b => b.onclick = () => act(b.dataset.a));
     $p("pie-morse").onsubmit = e => { e.preventDefault(); const i = e.target.querySelector("input"); if (i.value.trim()) { act("morse", i.value.trim()); i.value = ""; } };
     R.els = {}; R.trails = {}; R.lastAt = 0; W.key = ""; W.last = {};
+    A.on = false; A.miss = 0; A.since = null;
+    alarm(d);
     updateMap(d);
     bindMap();
     radarData(d);
@@ -748,6 +807,7 @@
       if (!res.ok || !$p("pie-meters")) return;
       const d = res.body;
       record(d);
+      alarm(d);
       updateMap(d);
       radarData(d);
       watchData(d, all);
