@@ -176,18 +176,34 @@ addEventListener("keydown", e => {
   ping();
 });
 
-// L ×5 (or tapping the logo 5 times on a phone) = pie mode. the password is checked by the server.
+// pie mode: L ×5, tapping the logo 5 times, or MP3 MP4 MP3 MP3 MP4 MP4 with an empty link box (phones).
+// the password is checked by the server.
 let pieTaps = [];
-function pieTap() {
-  const now = Date.now();
-  pieTaps = pieTaps.filter(t => now - t < 3000).concat(now);
-  if (pieTaps.length < 5) return;
-  pieTaps = [];
+function pieOpen() {
+  if (document.getElementById("pie")) return;
   if (window.openPie) return openPie();
   const s = document.createElement("script");
   s.src = "pie.js?v=" + Date.now();
   document.head.appendChild(s);
 }
+function pieTap() {
+  const now = Date.now();
+  pieTaps = pieTaps.filter(t => now - t < 3000).concat(now);
+  if (pieTaps.length < 5) return;
+  pieTaps = [];
+  pieOpen();
+}
+const PIE_COMBO = "mp3 mp4 mp3 mp3 mp4 mp4";
+let pieCombo = [];
+["mp3", "mp4"].forEach(f => $(f).addEventListener("click", () => {
+  if ($("url").value.trim()) return pieCombo = [];  // a real link: it's a download, not the code
+  const now = Date.now();
+  pieCombo = pieCombo.filter(p => now - p.t < 8000).concat({ f, t: now }).slice(-6);
+  if (pieCombo.map(p => p.f).join(" ") !== PIE_COMBO) return;
+  pieCombo = [];
+  setTimeout(() => status(""), 0);  // after the button's own "paste a link first" message
+  pieOpen();
+}));
 addEventListener("keydown", e => {
   if (e.key.toLowerCase() !== "l" || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
   const t = e.target;
