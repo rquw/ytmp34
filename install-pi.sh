@@ -126,7 +126,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable -q pi-status
 sudo systemctl restart pi-status
 
-echo "==> Setting up PRISMO's jobs (morning briefing Mo-Fr 6:30, watchdog every minute)"
+echo "==> Setting up PRISMO's jobs (morning briefing Mo-Fr 6:08, watchdog every minute)"
 mkdir -p "$HOME/prismo"
 curl -fsSL "$RAW/prismo.py" -o "$HOME/prismo/prismo.py"
 # pushes go to the untis watcher's ntfy topic; edit place/lat/lon and the sites in ~/prismo/config.json
@@ -157,7 +157,7 @@ WantedBy=timers.target
 UNIT
 sudo tee /etc/systemd/system/prismo-briefing.timer >/dev/null <<UNIT
 [Timer]
-OnCalendar=Mon..Fri 06:30
+OnCalendar=Mon..Fri 06:08
 [Install]
 WantedBy=timers.target
 UNIT

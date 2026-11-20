@@ -76,19 +76,36 @@
   @media (max-width: 520px) { #pie .pet { grid-template-columns: 1fr; justify-items: center; text-align: center; } #pie .bubble::before { display: none; }
     #pie .stats { width: 100%; text-align: left; } #pie .actions { justify-content: center; } #pie .logo { font-size: 32px; } #pie .logo small { display: none; } }
 
-  /* the live map */
-  #pie svg.map { width: 100%; height: auto; display: block; }
-  #pie .map .link { fill: none; stroke: var(--track); stroke-width: 3; }
-  #pie .map .flow { fill: none; stroke: url(#pie-g); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 2 14; animation: pie-flow 1.5s linear infinite; }
-  #pie .map .flow.idle { opacity: .15; animation-play-state: paused; }
-  #pie .map .flow.down { stroke: var(--bad); opacity: .7; stroke-dasharray: 6 8; animation: none; }
-  @keyframes pie-flow { to { stroke-dashoffset: -64; } }
-  #pie .map .node circle { fill: var(--card); stroke: var(--line); stroke-width: 2; }
-  #pie .map .node.hot circle { stroke: #8d7bff; stroke-width: 3; }
-  #pie .map .node.dead circle { stroke: var(--bad); stroke-width: 3; }
-  #pie .map text { fill: var(--ink); font: 600 13px system-ui, sans-serif; text-anchor: middle; }
-  #pie .map text.e { font-size: 26px; } #pie .map text.v { fill: var(--dim); font-size: 12px; }
-
+  /* the live map: a little dark universe, also in light mode */
+  #pie .mapbox { position: relative; border-radius: 18px; overflow: hidden; margin: 0 -4px;
+    background: radial-gradient(circle at 50% 48%, #2b1f5c 0%, #140f2e 55%, #08061a 100%); }
+  #pie .mapbox::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .55;
+    background-image: radial-gradient(1px 1px at 12% 18%, #fff, transparent), radial-gradient(1px 1px at 72% 12%, #fff, transparent),
+      radial-gradient(1px 1px at 33% 76%, #fff, transparent), radial-gradient(1.5px 1.5px at 88% 64%, #fff, transparent),
+      radial-gradient(1px 1px at 52% 38%, #cfc6ff, transparent), radial-gradient(1px 1px at 8% 88%, #fff, transparent),
+      radial-gradient(1px 1px at 94% 92%, #cfc6ff, transparent), radial-gradient(1px 1px at 61% 86%, #fff, transparent),
+      linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+    background-size: auto, auto, auto, auto, auto, auto, auto, auto, 30px 30px, 30px 30px; }
+  #pie svg.map { position: relative; width: 100%; height: auto; display: block; }
+  #pie .map .wire { fill: none; stroke-width: 2; opacity: .22; }
+  #pie .map .wire.down { stroke: #ff4d7a !important; opacity: .7; stroke-dasharray: 5 7; }
+  #pie .map .halo { opacity: .35; transform-box: fill-box; transform-origin: center; animation: pie-halo 2.4s ease-out infinite; }
+  @keyframes pie-halo { from { transform: scale(.9); opacity: .55; } to { transform: scale(1.7); opacity: 0; } }
+  #pie .map .core { fill: rgba(255,255,255,.07); stroke-width: 2; }
+  #pie .map .dead .core { stroke: #ff4d7a !important; }
+  #pie .map .dead .halo { display: none; }
+  #pie .map text { fill: #ece9ff; font: 600 13px system-ui, sans-serif; text-anchor: middle; }
+  #pie .map text.e { font-size: 24px; } #pie .map text.v { fill: #a9a3d6; font-size: 11.5px; }
+  #pie .map .node { cursor: pointer; }
+  #pie .map .ring { fill: none; stroke-width: 5; stroke-linecap: round; transition: stroke-dashoffset .8s ease, stroke .8s ease; }
+  #pie .map .ringbg { fill: none; stroke: rgba(255,255,255,.08); stroke-width: 5; }
+  #pie .map .pkt { mix-blend-mode: screen; }
+  #pie .maptip { position: relative; margin: 0; padding: 10px 14px 12px; color: #d9d4ff; font-size: 13px; min-height: 2.6em;
+    background: linear-gradient(transparent, rgba(0,0,0,.25)); }
+  #pie .maptip b { color: #fff; }
+  #pie .flash { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); padding: 4px 12px; border-radius: 99px; font-weight: 700; font-size: 13px;
+    color: #fff; background: rgba(141,123,255,.85); opacity: 0; transition: opacity .3s; pointer-events: none; white-space: nowrap; }
+  #pie .flash.on { opacity: 1; }
   /* meters */
   #pie .meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
   #pie .m { padding: 10px 12px; border-radius: 14px; background: var(--track); min-width: 0; }
@@ -144,7 +161,7 @@
     if (!pet) return "…";
     const pick = arr => arr[Math.floor(Date.now() / 15000) % arr.length];  // changes every 15 s
     if (pet.led?.what) return `✨ Ich ${pet.led.what === "herzklopfen" ? "hab Herzklopfen" : pet.led.what} …`;
-    if (pet.asleep) return pick(["Zzz… ich träume von MP3s 💤", "Zzz… *schnarch* … 512 MB RAM … zzz", "Pssst, ich schlafe. Um 6:30 gibt's Wetter ☀️", "Zzz… wer streichelt mich um diese Uhrzeit 🥱"]);
+    if (pet.asleep) return pick(["Zzz… ich träume von MP3s 💤", "Zzz… *schnarch* … 512 MB RAM … zzz", "Pssst, ich schlafe. Um 6:08 gibt's Wetter ☀️", "Zzz… wer streichelt mich um diese Uhrzeit 🥱"]);
     const cancel = (u.irregular || []).find(l => l.status === "CANCELLED" && (l.start.startsWith(day(0)) || l.start.startsWith(day(1))));
     if (cancel) return `${cancel.start.startsWith(day(0)) ? "Heute" : "Morgen"} fällt ${cancel.subject} aus!! 🎉🎉`;
     if (pet.food < 25) return pick(["Ich hab soooo Hunger 🥺 konvertier mal ein Video für mich", "Gib mir ein MP3 zu essen bitte 🎵🍴", "Mein Magen knurrt in Binärcode 01101000"]);
@@ -259,54 +276,177 @@
     } catch { t.textContent = "PRISMO antwortet nicht 💤"; t.className = "toast bad"; }
   }
 
-  // --- the live map: everything ytmp34 + prismo touches, pulsing with real activity ---
+  // --- the live map: everything ytmp34 + prismo touches. packets fly with the real traffic ---
   const NODES = {
-    you: { x: 80, y: 60, e: "📱", l: "Du" }, oracle: { x: 300, y: 60, e: "🦁", l: "Oracle" }, yt: { x: 520, y: 60, e: "▶️", l: "YouTube" },
-    pi: { x: 300, y: 205, e: "🍓", l: "PRISMO" }, untis: { x: 80, y: 330, e: "📚", l: "WebUntis" }, ntfy: { x: 300, y: 340, e: "🔔", l: "ntfy" },
-    sites: { x: 520, y: 330, e: "🌐", l: "Seiten" },
+    you: { x: 90, y: 70, e: "📱", l: "Du", c: "#ff74c8", r: 28 }, oracle: { x: 300, y: 62, e: "🦁", l: "Oracle", c: "#ffb547", r: 30 },
+    yt: { x: 510, y: 70, e: "▶️", l: "YouTube", c: "#ff4d4d", r: 28 }, pi: { x: 300, y: 228, e: "🍓", l: "PRISMO", c: "#3dff9a", r: 40 },
+    untis: { x: 90, y: 360, e: "📚", l: "WebUntis", c: "#5cc8ff", r: 28 }, ntfy: { x: 300, y: 382, e: "🔔", l: "ntfy", c: "#c58bff", r: 26 },
+    sites: { x: 510, y: 360, e: "🌐", l: "deine Seiten", c: "#38d6c4", r: 28 },
   };
-  const LINKS = [["you", "oracle"], ["oracle", "pi"], ["pi", "yt"], ["pi", "untis"], ["pi", "ntfy"], ["pi", "sites"], ["ntfy", "you"]];
+  // [from, to, bend]: packets fly from → to (rev = the other way)
+  const LINKS = { yt_pi: ["yt", "pi", 40], pi_oracle: ["pi", "oracle", -30], oracle_you: ["oracle", "you", 26], pi_untis: ["pi", "untis", 30],
+    pi_ntfy: ["pi", "ntfy", -18], ntfy_you: ["ntfy", "you", -120], pi_sites: ["pi", "sites", -30] };
+  const ms = { rates: {}, burst: [], down: {}, led: false, io: false, temp: 45, cpu: 0, lastVideos: null, lastPush: null, tip: "pi", d: null };
+  let raf = 0, lastT = 0, pkts = [];
+
+  function linkPath([a, b, bend]) {
+    const A = NODES[a], B = NODES[b], mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2;
+    const dx = B.x - A.x, dy = B.y - A.y, len = Math.hypot(dx, dy) || 1;
+    return `M${A.x},${A.y} Q${(mx - dy / len * bend).toFixed(1)},${(my + dx / len * bend).toFixed(1)} ${B.x},${B.y}`;
+  }
+
   function mapSvg() {
-    const path = ([a, b]) => { const A = NODES[a], B = NODES[b]; return `M${A.x},${A.y} L${B.x},${B.y}`; };
-    return `<svg class="map" viewBox="0 0 600 400" role="img" aria-label="Live-Karte">
-      <defs><linearGradient id="pie-g" x1="0" x2="1"><stop offset="0" stop-color="#8d7bff"/><stop offset=".55" stop-color="#ff74c8"/><stop offset="1" stop-color="#38d6c4"/></linearGradient></defs>
-      ${LINKS.map(l => `<path class="link" d="${path(l)}"/><path class="flow idle" id="pie-l-${l.join("-")}" d="${path(l)}"/>`).join("")}
-      ${Object.entries(NODES).map(([k, n]) => `<g class="node" id="pie-n-${k}"><circle cx="${n.x}" cy="${n.y}" r="30"/>
-        <text class="e" x="${n.x}" y="${n.y + 9}">${n.e}</text><text x="${n.x}" y="${n.y + 48}">${n.l}</text>
-        <text class="v" id="pie-v-${k}" x="${n.x}" y="${n.y + 63}"></text></g>`).join("")}
-    </svg>`;
+    const ringC = 2 * Math.PI * 48;
+    return `<div class="mapbox"><div class="flash" id="pie-flash"></div>
+      <svg class="map" id="pie-map" viewBox="0 0 600 440" role="img" aria-label="Live-Karte von PRISMO">
+      <defs><filter id="pie-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3.2" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        <filter id="pie-soft" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="7"/></filter></defs>
+      ${Object.entries(LINKS).map(([k, l]) => `<path class="wire" id="pie-w-${k}" d="${linkPath(l)}" stroke="${NODES[l[0]].c}"/>`).join("")}
+      <g id="pie-pkts"></g>
+      ${Object.entries(NODES).map(([k, n]) => `<g class="node" id="pie-n-${k}" data-k="${k}">
+        <circle class="halo" cx="${n.x}" cy="${n.y}" r="${n.r}" fill="${n.c}" filter="url(#pie-soft)"/>
+        ${k === "pi" ? `<circle class="ringbg" cx="${n.x}" cy="${n.y}" r="48"/><circle class="ring" id="pie-ring" cx="${n.x}" cy="${n.y}" r="48"
+            stroke-dasharray="${ringC.toFixed(1)}" stroke-dashoffset="${ringC.toFixed(1)}" transform="rotate(-90 ${n.x} ${n.y})"/>` : ""}
+        <circle class="core" cx="${n.x}" cy="${n.y}" r="${n.r}" stroke="${n.c}" filter="url(#pie-glow)"/>
+        <text class="e" x="${n.x}" y="${n.y + (k === "pi" ? 11 : 8)}" style="${k === "pi" ? "font-size:34px" : ""}">${n.e}</text>
+        ${k === "pi" ? `<circle id="pie-mled" cx="${n.x + 27}" cy="${n.y - 27}" r="5" fill="#3dff9a" filter="url(#pie-glow)"/>` : ""}
+        <text x="${n.x}" y="${n.y + n.r + (k === "pi" ? 30 : 18)}">${n.l}</text>
+        <text class="v" id="pie-v-${k}" x="${n.x}" y="${n.y + n.r + (k === "pi" ? 45 : 33)}"></text></g>`).join("")}
+      </svg><p class="maptip" id="pie-tip"></p></div>`;
   }
-  function flow(id, level, down) {  // level 0..1 → faster pulses
-    const el = $p("pie-l-" + id); if (!el) return;
-    el.classList.toggle("down", !!down);
-    el.classList.toggle("idle", !down && level <= 0);
-    const want = (2.6 - 2.2 * Math.min(1, level)).toFixed(1) + "s";
-    if (level > 0 && el.style.animationDuration !== want) el.style.animationDuration = want;
+
+  function spawn(key, rev = false, color) {
+    const path = $p("pie-w-" + key), g = $p("pie-pkts");
+    if (!path || !g || pkts.length > 140) return;
+    const l = LINKS[key], c = color || NODES[rev ? l[1] : l[0]].c;
+    const tail = document.createElementNS("http://www.w3.org/2000/svg", "circle"), head = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    tail.setAttribute("r", "5"); tail.setAttribute("fill", c); tail.setAttribute("opacity", ".35"); tail.setAttribute("filter", "url(#pie-soft)");
+    head.setAttribute("r", "2.8"); head.setAttribute("fill", "#fff"); head.setAttribute("filter", "url(#pie-glow)");
+    head.classList.add("pkt"); tail.classList.add("pkt");
+    g.append(tail, head);
+    pkts.push({ path, len: path.getTotalLength(), t: 0, dur: 1.1 + Math.random() * .5, rev, head, tail });
   }
-  function nodeVal(k, text, state) {
+
+  // a chain of bursts, e.g. a fresh video: youtube → prismo → oracle → you
+  function burst(keys, n = 10) {
+    keys.forEach(([key, rev], i) => ms.burst.push({ key, rev, n, at: performance.now() + i * 650 }));
+  }
+  function flash(text) {
+    const f = $p("pie-flash"); if (!f) return;
+    f.textContent = text; f.classList.add("on");
+    clearTimeout(flash.t); flash.t = setTimeout(() => f.classList.remove("on"), 2600);
+  }
+
+  function frame(t) {
+    if (!$p("pie-map")) { raf = 0; pkts = []; return; }
+    const dt = Math.min(.1, (t - (lastT || t)) / 1000); lastT = t;
+    // steady traffic
+    for (const [key, r] of Object.entries(ms.rates)) {
+      const [fwd, back] = Array.isArray(r) ? r : [r, 0];
+      if (!ms.down[key] && Math.random() < fwd * dt) spawn(key);
+      if (!ms.down[key] && Math.random() < back * dt) spawn(key, true);
+    }
+    // scheduled bursts
+    ms.burst = ms.burst.filter(b => {
+      if (t < b.at) return true;
+      if (Math.random() < .5) { spawn(b.key, b.rev); b.n--; }
+      return b.n > 0;
+    });
+    // move packets
+    pkts = pkts.filter(p => {
+      p.t += dt / p.dur;
+      if (p.t >= 1) { p.head.remove(); p.tail.remove(); return false; }
+      const at = f => p.path.getPointAtLength((p.rev ? 1 - f : f) * p.len);
+      const h = at(p.t), tl = at(Math.max(0, p.t - .06));
+      p.head.setAttribute("cx", h.x.toFixed(1)); p.head.setAttribute("cy", h.y.toFixed(1));
+      p.tail.setAttribute("cx", tl.x.toFixed(1)); p.tail.setAttribute("cy", tl.y.toFixed(1));
+      return true;
+    });
+    // the mini LED copies the real one: solid, flickers with sd activity, blinks wildly during a light show
+    const led = $p("pie-mled");
+    if (led) {
+      const on = ms.led ? (t % 260) < 130 : !(ms.io && Math.random() < .5);
+      led.setAttribute("fill", on ? "#3dff9a" : "#1b4d2f"); led.setAttribute("opacity", ms.down.pi_oracle ? ".2" : "1");
+    }
+    raf = requestAnimationFrame(frame);
+  }
+
+  function setVal(k, text, dead) {
     const v = $p("pie-v-" + k); if (v) v.textContent = text;
-    const n = $p("pie-n-" + k); if (n) { n.classList.toggle("hot", state === "hot"); n.classList.toggle("dead", state === "dead"); }
+    const n = $p("pie-n-" + k); if (n) n.classList.toggle("dead", !!dead);
   }
+
+  function tipText(k, d) {
+    const p = d.pi, o = d.oracle || {}, sites = Object.entries(p?.prismo?.sites || {});
+    return {
+      you: `<b>📱 Du & alle anderen</b>: ${o.active ?? 0} gerade auf ytmp34, ${num(o.totals?.videos, 0)} Videos insgesamt.`,
+      oracle: `<b>🦁 Oracle</b> wandelt die Videos um: ${num(o.cpu, 0)} % CPU, ${o.queue?.running ?? 0} in Arbeit, YouTube ${o.youtube_ok ? "zufrieden" : "blockiert"}.`,
+      yt: `<b>▶️ YouTube</b> sieht nur deine Heim-Adresse, weil Oracle seine Anfragen durch PRISMO schickt. Gerade ↓ ${rate(p?.net?.rx || 0)}.`,
+      pi: p ? `<b>🍓 PRISMO</b>: ${num(p.cpu_temp)} °C, ${num(p.cpu, 0)} % CPU, läuft seit ${dur(p.uptime)}. Das kleine Licht oben ist sein echtes grünes Licht.` : `<b>🍓 PRISMO</b> ist offline.`,
+      untis: `<b>📚 WebUntis</b>: PRISMO schaut alle 5 Minuten für ${esc(p?.untis?.class || "?")} nach, zuletzt ${isoAgo(p?.untis?.checked)}.`,
+      ntfy: `<b>🔔 ntfy</b> bringt PRISMOs Nachrichten auf dein Handy. Zuletzt: ${esc((p?.untis?.pushes || [])[0]?.title || "noch nichts")}.`,
+      sites: `<b>🌐 Wachhund</b>: ${sites.map(([n, x]) => (x.ok ? "✅ " : "🚨 ") + esc(n)).join(" · ") || "startet gleich"}.`,
+    }[k];
+  }
+
   function updateMap(d) {
     const p = d.pi, o = d.oracle || {}, now = Date.now() / 1000;
+    ms.d = d;
     const rx = p?.net?.rx || 0, tx = p?.net?.tx || 0, conv = (o.queue?.running || 0) + (o.queue?.waiting || 0);
-    nodeVal("you", `${o.active ?? 0} online`, (o.active || 0) > 0 ? "hot" : "");
-    nodeVal("oracle", conv ? `${conv} konvertiert` : `${num(o.cpu, 0)} % CPU`, conv ? "hot" : "");
-    nodeVal("pi", p ? `${num(p.cpu_temp, 0)} °C · ${num(p.cpu, 0)} %` : "offline", p ? "" : "dead");
-    nodeVal("yt", rx > 50e3 ? "↓ " + rate(rx) : "", rx > 50e3 ? "hot" : "");
     const checked = p?.untis?.checked ? now - new Date(p.untis.checked).getTime() / 1000 : 1e9;
-    nodeVal("untis", p ? (checked < 400 ? "alle 5 Min" : "?") : "", "");
-    const lastPush = (p?.untis?.pushes || [])[0], pushAge = lastPush ? now - new Date(lastPush.at).getTime() / 1000 : 1e9;
-    nodeVal("ntfy", lastPush ? isoAgo(lastPush.at) : "", pushAge < 300 ? "hot" : "");
     const sites = Object.values(p?.prismo?.sites || {}), down = sites.filter(s => s.down_since).length;
-    nodeVal("sites", sites.length ? (down ? `${down} offline!` : `${sites.length} online`) : "", down ? "dead" : "");
-    flow("you-oracle", conv ? 1 : (o.active ? .2 : 0));
-    flow("oracle-pi", p ? Math.min(1, (tx + rx) / 2e6 + (conv ? .5 : .05)) : 0, !p);
-    flow("pi-yt", p ? Math.min(1, rx / 2e6 + (conv ? .4 : 0)) : 0, !p);
-    flow("pi-untis", p && checked < 60 ? .6 : 0, !p);
-    flow("pi-ntfy", pushAge < 120 ? 1 : 0, !p);
-    flow("ntfy-you", pushAge < 120 ? 1 : 0);
-    flow("pi-sites", p ? .15 : 0, !p || down);
+    const siteAge = sites.length ? now - Math.max(...sites.map(s => s.checked || 0)) : 1e9;
+    ms.rates = {
+      // a small baseline (tailscale, watchdog and proxy really do chatter all the time) + the real traffic on top
+      yt_pi: Math.min(10, .7 + rx / 20e3 + conv * 3),
+      pi_oracle: [Math.min(10, .8 + tx / 20e3 + conv * 3), .5 + conv],
+      oracle_you: Math.min(10, .25 + (o.active || 0) * .8 + conv * 3),
+      pi_untis: checked < 12 ? [6, 6] : [.12, .12],
+      pi_ntfy: .05, ntfy_you: .05,
+      pi_sites: siteAge < 8 ? [5, 5] : [.35, .35],
+    };
+    const off = !p;
+    ms.down = { yt_pi: off, pi_oracle: off, pi_untis: off, pi_ntfy: off, pi_sites: off || down > 0 };
+    Object.keys(LINKS).forEach(k => $p("pie-w-" + k)?.classList.toggle("down", !!ms.down[k]));
+    ms.led = !!p?.pet?.led?.what;
+    ms.io = (p?.io?.read || 0) + (p?.io?.write || 0) > 0;
+    // events → bursts
+    const videos = o.totals?.videos;
+    if (ms.lastVideos != null && videos > ms.lastVideos) {
+      burst([["yt_pi"], ["pi_oracle"], ["oracle_you"]], 14);
+      flash("🎵 Gerade wurde ein Video konvertiert!");
+    }
+    ms.lastVideos = videos;
+    const push = (p?.untis?.pushes || [])[0]?.at;
+    if (ms.lastPush != null && push && push !== ms.lastPush) { burst([["pi_ntfy"], ["ntfy_you"]], 10); flash("🔔 PRISMO hat dir was geschickt"); }
+    if (push) ms.lastPush = push;
+    // PRISMO's ring: length = cpu, colour = temperature (cool cyan → hot red)
+    const ring = $p("pie-ring");
+    if (ring && p) {
+      const C = 2 * Math.PI * 48, hot = Math.max(0, Math.min(1, ((p.cpu_temp || 40) - 40) / 30));
+      ring.setAttribute("stroke-dashoffset", (C * (1 - Math.max(.04, (p.cpu || 0) / 100))).toFixed(1));
+      ring.setAttribute("stroke", `hsl(${(180 - 180 * hot).toFixed(0)} 95% 60%)`);
+    }
+    setVal("you", `${o.active ?? 0} online`);
+    setVal("oracle", conv ? `${conv} in Arbeit` : `${num(o.cpu, 0)} % CPU`);
+    setVal("yt", rx > 20e3 ? "↓ " + rate(rx) : "ruhig");
+    setVal("pi", p ? `${num(p.cpu_temp, 0)} °C · ${num(p.cpu, 0)} % · ${p.pet?.face || ""}` : "offline", !p);
+    setVal("untis", p?.untis?.class ? `${p.untis.class} · ${isoAgo(p.untis.checked)}` : "");
+    setVal("ntfy", (p?.untis?.pushes || [])[0] ? isoAgo(p.untis.pushes[0].at) : "");
+    setVal("sites", sites.length ? (down ? `${down} offline!` : `${sites.length} online`) : "", down > 0);
+    const tip = $p("pie-tip"); if (tip) tip.innerHTML = tipText(ms.tip, d) || "";
+    if (!raf) { lastT = 0; raf = requestAnimationFrame(frame); }
+  }
+
+  function bindMap() {
+    document.querySelectorAll("#pie .map .node").forEach(n => n.onclick = () => {
+      ms.tip = n.dataset.k;
+      const k = n.dataset.k;
+      // tapping fires a little burst along that node's wires, just for fun
+      Object.entries(LINKS).forEach(([key, [a, b]]) => { if (a === k) burst([[key]], 5); else if (b === k) burst([[key, true]], 5); });
+      if (ms.d) $p("pie-tip").innerHTML = tipText(k, ms.d);
+    });
   }
 
   // --- live meters ---
@@ -384,8 +524,8 @@
       ${sites.length ? sites.map(([n, x]) => row(esc(n), x.ok ? `<span class="ok">online</span> <small>${num(x.took, 2)} s</small>` : `<span class="bad">${x.down_since ? "offline seit " + dur(Date.now() / 1000 - x.down_since) : "wackelt"}</span>`)).join("") : `<p class="dim">${p ? "startet gleich" : "wohnt auf PRISMO"}</p>`}
       <small>PRISMO selbst wird von Oracle bewacht 🦁</small>
     </section>
-    <section class="card"><h2>☀️ Morgen-Briefing <small>Mo–Fr 6:30</small></h2>
-      ${p?.prismo?.briefing ? `<small>${isoAgo(p.prismo.briefing.at)}</small><p style="white-space:pre-line;margin:6px 0 0">${esc(p.prismo.briefing.text)}</p>` : `<p class="dim">Das erste kommt um 6:30 🌅</p>`}
+    <section class="card"><h2>☀️ Morgen-Briefing <small>Mo–Fr 6:08</small></h2>
+      ${p?.prismo?.briefing ? `<small>${isoAgo(p.prismo.briefing.at)}</small><p style="white-space:pre-line;margin:6px 0 0">${esc(p.prismo.briefing.text)}</p>` : `<p class="dim">Das erste kommt um 6:08 🌅</p>`}
     </section>
     <section class="card"><h2>🔔 Letzte Pushes</h2>
       ${(u.pushes || []).length ? `<ul>${u.pushes.slice(0, 5).map(x => `<li><b>${esc(x.title)}</b> <small>${isoAgo(x.at)}</small><br><small style="white-space:pre-line">${esc(x.message)}</small></li>`).join("")}</ul>` : `<p class="dim">noch keine</p>`}
@@ -413,7 +553,7 @@
         <div><span class="live"><i></i>live</span> <button class="ghost" type="button" data-x style="margin-left:8px">✕</button></div></header>
       ${petCard(d)}
       <div class="grid">
-        <section class="card wide"><h2>🗺️ PRISMO-Netz <small>alles, was gerade passiert</small></h2>${mapSvg()}</section>
+        <section class="card wide"><h2>🗺️ PRISMO-Netz <small>live · tipp auf einen Punkt</small></h2>${mapSvg()}</section>
         <section class="card wide"><h2>⚡ Live</h2><div id="pie-meters">${meters(d)}</div></section>
         <section class="card wide"><h2>📈 Die letzten 24 Stunden</h2><div id="pie-chart">${chart()}</div></section>
       </div>
@@ -425,6 +565,7 @@
     r.querySelectorAll("[data-a]").forEach(b => b.onclick = () => act(b.dataset.a));
     $p("pie-morse").onsubmit = e => { e.preventDefault(); const i = e.target.querySelector("input"); if (i.value.trim()) { act("morse", i.value.trim()); i.value = ""; } };
     updateMap(d);
+    bindMap();
     clearInterval(timer);
     tick = 0;
     timer = setInterval(() => { tick++; refresh(tick % 5 === 0, tick % 60 === 0); }, 1000);
