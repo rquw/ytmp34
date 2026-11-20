@@ -300,8 +300,10 @@
   async function act(action, text) {
     const t = $p("pie-toast");
     t.textContent = "…"; t.className = "toast";
+    spawn("oracle_you", true); setTimeout(() => spawn("pi_oracle", true), 600);
     try {
       const res = await api({ action, text });
+      if (res.status !== 504) { spawn("pi_oracle"); setTimeout(() => spawn("oracle_you"), 600); }
       t.textContent = res.body.message || res.body.error || "?";
       t.className = "toast " + (res.ok ? "ok" : "bad");
       if (res.ok) setTimeout(() => refresh(true), 400);
@@ -318,7 +320,7 @@
   // [from, to, bend]: packets fly from → to (rev = the other way)
   const LINKS = { yt_pi: ["yt", "pi", 40], pi_oracle: ["pi", "oracle", -30], oracle_you: ["oracle", "you", 26], pi_untis: ["pi", "untis", 30],
     pi_ntfy: ["pi", "ntfy", -18], ntfy_you: ["ntfy", "you", -120], pi_sites: ["pi", "sites", -30], sky_pi: ["sky", "pi", 22] };
-  const ms = { rates: {}, burst: [], down: {}, led: false, io: false, temp: 45, cpu: 0, lastVideos: null, lastPush: null, lastPlanes: null, tip: "pi", d: null };
+  const ms = { rates: {}, burst: [], down: {}, led: false, io: false, temp: 45, cpu: 0, lastVideos: null, lastPush: null, lastPlanes: null, lastUntis: null, tip: "pi", d: null };
   let raf = 0, lastT = 0, pkts = [];
 
   function linkPath([a, b, bend]) {
@@ -429,16 +431,15 @@
     const p = d.pi, o = d.oracle || {}, now = Date.now() / 1000;
     ms.d = d;
     const rx = p?.net?.rx || 0, tx = p?.net?.tx || 0, conv = (o.queue?.running || 0) + (o.queue?.waiting || 0);
-    const checked = p?.untis?.checked ? now - new Date(p.untis.checked).getTime() / 1000 : 1e9;
     const sites = Object.values(p?.prismo?.sites || {}), down = sites.filter(s => s.down_since).length;
+    // only real work makes dots. steady streams only while youtube data really flows through PRISMO's proxy
+    // (a conversion on oracle, or oracle asking youtube about a link); everything else is one dot per real event below.
+    // [forward, back]: forward = the link's first node → second (e.g. youtube → PRISMO), back = the other way
+    const yt = conv > 0 || ((p?.proxy_clients || 0) > 0 && rx > 30e3), flow = yt ? Math.min(9, 1.5 + rx / 60e3) : 0;
     ms.rates = {
-      // a small baseline (tailscale, watchdog and proxy really do chatter all the time) + the real traffic on top
-      yt_pi: Math.min(10, .7 + rx / 20e3 + conv * 3),
-      pi_oracle: [Math.min(10, .8 + tx / 20e3 + conv * 3), .5 + conv],
-      oracle_you: Math.min(10, .25 + (o.active || 0) * .8 + conv * 3),
-      pi_untis: checked < 12 ? [6, 6] : [.12, .12],
-      pi_ntfy: .05, ntfy_you: .05,
-      pi_sites: [.2, .2], sky_pi: .15,
+      yt_pi: [flow, yt ? .6 : 0],              // video data comes in, small requests go out
+      pi_oracle: [flow, yt ? .6 : 0],          // PRISMO hands it to oracle, oracle asks for more
+      oracle_you: [conv ? 1.2 : 0, 0],         // oracle sends the finished file
     };
     const off = !p;
     ms.down = { yt_pi: off, pi_oracle: off, pi_untis: off, pi_ntfy: off, pi_sites: off || down > 0, sky_pi: off || !p?.planes?.at };
@@ -448,16 +449,21 @@
     // events → bursts
     const videos = o.totals?.videos;
     if (ms.lastVideos != null && videos > ms.lastVideos) {
-      burst([["yt_pi"], ["pi_oracle"], ["oracle_you"]], 14);
+      burst([["yt_pi"], ["pi_oracle"], ["oracle_you"]], 6);
       flash("🎵 Gerade wurde ein Video konvertiert!");
     }
     ms.lastVideos = videos;
     const push = (p?.untis?.pushes || [])[0]?.at;
     if (ms.lastPush != null && push && push !== ms.lastPush) { burst([["pi_ntfy"], ["ntfy_you"]], 10); flash("🔔 PRISMO hat dir was geschickt"); }
     if (push) ms.lastPush = push;
+    // PRISMO asks adsb.lol for the planes (out), the answer comes back (in)
     const pat = p?.planes?.at;
-    if (ms.lastPlanes != null && pat && pat !== ms.lastPlanes) burst([["sky_pi"]], 3);
+    if (ms.lastPlanes != null && pat && pat !== ms.lastPlanes) { spawn("sky_pi", true); setTimeout(() => spawn("sky_pi"), 700); }
     if (pat) ms.lastPlanes = pat;
+    // the untis watcher asks webuntis every 5 minutes: one dot out, one back
+    const uc = p?.untis?.checked;
+    if (ms.lastUntis != null && uc && uc !== ms.lastUntis) { spawn("pi_untis"); setTimeout(() => spawn("pi_untis", true), 900); }
+    if (uc) ms.lastUntis = uc;
     // PRISMO's ring: length = cpu, colour = temperature (cool cyan → hot red)
     const ring = $p("pie-ring");
     if (ring && p) {
@@ -467,7 +473,7 @@
     }
     setVal("you", `${o.active ?? 0} online`);
     setVal("oracle", conv ? `${conv} in Arbeit` : `${num(o.cpu, 0)} % CPU`);
-    setVal("yt", rx > 20e3 ? "↓ " + rate(rx) : "ruhig");
+    setVal("yt", yt ? "↓ " + rate(rx) : "ruhig");
     setVal("pi", p ? `${num(p.cpu_temp, 0)} °C · ${num(p.cpu, 0)} %` : "offline", !p);
     setVal("untis", p?.untis?.class ? `${p.untis.class} · ${isoAgo(p.untis.checked)}` : "");
     setVal("ntfy", (p?.untis?.pushes || [])[0] ? isoAgo(p.untis.pushes[0].at) : "");
@@ -481,8 +487,6 @@
     document.querySelectorAll("#pie .map .node").forEach(n => n.onclick = () => {
       ms.tip = n.dataset.k;
       const k = n.dataset.k;
-      // tapping fires a little burst along that node's wires, just for fun
-      Object.entries(LINKS).forEach(([key, [a, b]]) => { if (a === k) burst([[key]], 5); else if (b === k) burst([[key, true]], 5); });
       if (ms.d) $p("pie-tip").innerHTML = tipText(k, ms.d);
     });
   }
