@@ -13,6 +13,7 @@ import socket
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections import defaultdict, deque
@@ -130,16 +131,19 @@ def friendly(msg):
 # --- phone alerts when the cookies stop working ---
 
 def notify(title, msg):
+    # the "ntfy" file holds one topic per line; json so titles can have emoji
     try:
         with open(os.path.join(HERE, "ntfy")) as f:
-            topic = f.read().strip()
+            topics = [t.strip() for t in f if t.strip()]
     except OSError:
         return
-    try:
-        req = urllib.request.Request("https://ntfy.sh/" + topic, data=msg.encode(), headers={"Title": title})
-        urllib.request.urlopen(req, timeout=10)
-    except Exception as e:
-        print("notify failed: %s" % e)
+    for topic in topics:
+        try:
+            body = json.dumps({"topic": topic, "title": title, "message": msg}).encode()
+            req = urllib.request.Request("https://ntfy.sh", data=body, headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=10)
+        except Exception as e:
+            print("notify failed: %s" % e)
 
 
 def cookies_state(ok):
@@ -270,24 +274,66 @@ def proxy_ok():
 
 
 pie_seen = {"at": 0, "running": False}
-pie_cache = {"pi": None, "pi_error": "not checked yet", "proxy_ok": None}
+pie_cache = {"pi": None, "pi_error": "not checked yet", "proxy_ok": None, "history": []}
 
 
 def pie_poller():
     # asks the pi every second, but only while someone has pie mode open, so /pie answers instantly
     # even when the pi is unplugged (no waiting for timeouts)
+    n = 0
     while time.time() - pie_seen["at"] < 30:
         pi, err = None, None
         if PI_STATUS:
             try:
-                with urllib.request.urlopen(PI_STATUS, timeout=3) as r:
+                full = n % 60 == 0  # the 24 h history only once a minute
+                with urllib.request.urlopen(PI_STATUS + ("?full=1" if full else ""), timeout=3) as r:
                     pi = json.loads(r.read())
+                if full:
+                    pie_cache["history"] = pi.pop("history", [])
             except Exception as e:
                 err = str(e)[:200]
         pie_cache.update(pi=pi, pi_error=err, proxy_ok=proxy_ok())
+        n += 1
         time.sleep(1)
     with lock:
         pie_seen["running"] = False
+
+
+def watch_pi():
+    # oracle keeps an eye on the pi: the pi can't send a push about itself being dead
+    if not PI_STATUS:
+        return
+    fails, down_since = 0, None
+    while True:
+        try:
+            urllib.request.urlopen(PI_STATUS, timeout=10).read()
+            if down_since:
+                notify("✅ PRISMO ist wieder da", "war %d Min weg. Oracle hat aufgepasst 🦁" % ((time.time() - down_since) // 60))
+            fails, down_since = 0, None
+        except Exception:
+            fails += 1
+            if fails == 5:  # 5 minutes without an answer
+                down_since = time.time() - 240
+                notify("🚨 PRISMO ist offline!", "Der Pi antwortet seit 5 Minuten nicht. Strom? WLAN? 🔌")
+        time.sleep(60)
+
+
+def pie_action(body):
+    # pet / snack / wave / morse: forwarded to the pi, which plays it on its LED
+    if not PI_STATUS:
+        return 503, {"error": "kein Pi eingerichtet"}
+    data = json.dumps({"action": str(body.get("action"))[:16], "text": str(body.get("text", ""))[:40]}).encode()
+    req = urllib.request.Request(PI_STATUS.rsplit("/", 1)[0] + "/action", data=data, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read())
+        except ValueError:
+            return e.code, {"error": "PRISMO hat komisch geantwortet"}
+    except Exception:
+        return 504, {"error": "PRISMO antwortet nicht 💤"}
 
 
 def pie_status():
@@ -485,13 +531,19 @@ class Handler(BaseHTTPRequestHandler):
         if urllib.parse.urlparse(self.path).path != "/pie":
             return self.json(404, {"error": "not found"})
         try:
-            pw = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 1000)) or b"{}").get("pw", "")
+            body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 1000)) or b"{}")
+            pw = body.get("pw", "")
         except ValueError:
-            pw = ""
+            body, pw = {}, ""
         ok, wait = pie_check(self.ip(), str(pw))
         if not ok:
             return self.json(403, {"error": "wrong" if not wait else "locked", "wait": wait})
-        self.json(200, pie_status())
+        if body.get("action"):
+            return self.json(*pie_action(body))
+        out = pie_status()
+        if body.get("full"):
+            out["history"] = pie_cache["history"]
+        self.json(200, out)
 
     def lookup(self, url, fmt):
         try:
@@ -602,4 +654,5 @@ if __name__ == "__main__":
     print("ytmp34 server on http://%s:%d  (yt-dlp %s)" % (a.host, a.port, yt_dlp.version.__version__))
     threading.Thread(target=watch_cookies, daemon=True).start()
     threading.Thread(target=sample_cpu, daemon=True).start()
+    threading.Thread(target=watch_pi, daemon=True).start()
     ThreadingHTTPServer((a.host, a.port), Handler).serve_forever()

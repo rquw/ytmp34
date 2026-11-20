@@ -118,9 +118,51 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 UNIT
+# PRISMO the pet uses the green LED: let this user switch it (also after reboots)
+printf 'z /sys/class/leds/ACT/brightness 0664 root %s - -\nz /sys/class/leds/ACT/trigger 0664 root %s - -\n' "$(id -gn)" "$(id -gn)" |
+  sudo tee /etc/tmpfiles.d/prismo-led.conf >/dev/null
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/prismo-led.conf
 sudo systemctl daemon-reload
 sudo systemctl enable -q pi-status
 sudo systemctl restart pi-status
+
+echo "==> Setting up PRISMO's jobs (morning briefing Mo-Fr 6:30, watchdog every minute)"
+mkdir -p "$HOME/prismo"
+curl -fsSL "$RAW/prismo.py" -o "$HOME/prismo/prismo.py"
+# pushes go to the untis watcher's ntfy topic; edit place/lat/lon and the sites in ~/prismo/config.json
+[ -f "$HOME/prismo/config.json" ] || cat > "$HOME/prismo/config.json" <<'CFG'
+{"place": "Zuhause", "lat": 48.3, "lon": 14.3,
+ "sites": [{"name": "Oracle (ytmp34)", "url": "https://example.sslip.io/ping"},
+           {"name": "ytmp34", "url": "https://rquw.github.io/ytmp34/"}]}
+CFG
+for job in watchdog briefing; do
+sudo tee /etc/systemd/system/prismo-$job.service >/dev/null <<UNIT
+[Unit]
+Description=prismo $job
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+User=$USER
+ExecStart=/usr/bin/python3 $HOME/prismo/prismo.py $job
+UNIT
+done
+sudo tee /etc/systemd/system/prismo-watchdog.timer >/dev/null <<UNIT
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1min
+AccuracySec=10s
+[Install]
+WantedBy=timers.target
+UNIT
+sudo tee /etc/systemd/system/prismo-briefing.timer >/dev/null <<UNIT
+[Timer]
+OnCalendar=Mon..Fri 06:30
+[Install]
+WantedBy=timers.target
+UNIT
+sudo systemctl daemon-reload
+sudo systemctl enable -q --now prismo-watchdog.timer prismo-briefing.timer
 
 for _ in $(seq 30); do curl -fsS "http://127.0.0.1:$PORT/ping" >/dev/null 2>&1 && break; sleep 2; done
 HOST="$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
