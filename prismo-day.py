@@ -475,7 +475,7 @@ def where(l):
     return "Gleis %s" % l["plat"] if l.get("plat") else ""
 
 
-def ride_steps(conn, push_first=False):
+def ride_steps(conn, pushes=True):
     steps, legs = [], conn["legs"]
     for i, l in enumerate(legs):
         dep = l["dep_rt"] or l["dep"]
@@ -486,7 +486,7 @@ def ride_steps(conn, push_first=False):
             if nxt and trains(conn) > 1 and mins(arr - dep) >= 15 and not short_line(nxt).startswith("Bim"):
                 detail += (", " if detail else "") + "schlaf, ich weck dich %s" % hm(arr - dt.timedelta(minutes=4))
             steps.append({"t": dep, "icon": "🚋" if short_line(l).startswith("Bim") else "🚆",
-                          "head": "%s %s" % (short_line(l), hm(dep)), "detail": detail, "push": push_first, "lead": 0})
+                          "head": "%s %s" % (short_line(l), hm(dep)), "detail": detail, "push": False, "lead": 0})
         else:
             prev = legs[i - 1]
             prev_arr, _ = guess(prev, "arr")
@@ -495,7 +495,7 @@ def ride_steps(conn, push_first=False):
             t = max(prev_arr - dt.timedelta(minutes=3), (prev["dep_rt"] or prev["dep"]) + dt.timedelta(minutes=1))
             steps.append({"t": t, "icon": "🚋" if city else "🔁",
                           "head": "%s %s: %s %s" % ("Raus in" if city else "Umsteigen in", place_name, short_line(l), hm(dep)),
-                          "detail": where(l), "push": True, "lead": 0, "loud": not city})
+                          "detail": where(l), "push": pushes and not city, "lead": 0, "loud": True})
     return steps
 
 
@@ -511,7 +511,7 @@ def timeline(day, ttl=60):
         ride = m["comfy"] if m["advice"] == "stay" and m["comfy"] else b
         stop = STOP_NAME[b["stop"]]
         who = m["who"] if b["stop"] == "bf" else "%s (oder %s zu Fuß)" % (m["who"], hm(m["walk_leave"]))
-        steps.append({"t": m["wake"], "icon": "⏰", "head": "Aufstehen", "detail": "um %s los" % hm(m["leave"]), "push": False})
+        steps.append({"t": m["wake"], "icon": "⏰", "head": "Aufstehen", "detail": "um %s los" % hm(m["leave"]), "push": True, "kind": "wake"})
         steps.append({"t": m["leave"], "icon": "🚗", "head": "Los mit %s" % who,
                       "detail": "%s, %s %s" % (stop, short_line(b["legs"][0]), hm(first_dep(b))), "push": True, "lead": 2})
         rides = ride_steps(ride)
@@ -528,7 +528,7 @@ def timeline(day, ttl=60):
             x = other[0]
             detail += "\n(%s: um %s raus = Ternberg %s)" % (x["rule"]["note"] if x["rule"] else "oder", hm(x["leave"]), hm(x["conn"]["exp"]))
         steps.append({"t": o["leave"], "icon": "🔔", "head": "Raus aus der Klasse", "detail": detail, "push": True, "lead": 5})
-        steps += ride_steps(o["conn"])
+        steps += ride_steps(o["conn"], pushes=False)
         steps.append({"t": o["conn"]["exp"], "icon": "🏠", "head": "Ternberg an", "detail": "", "push": False})
     steps.sort(key=lambda s: s["t"])
     return steps
@@ -778,6 +778,8 @@ def answer(mode, lat=None, lon=None):
         return home_now(lat, lon)
     if "zug" in mode or "züge" in mode or "bahn" in mode:
         return next_trains(lat, lon)
+    if "linz" in mode:
+        return linz_answer()
     if "morgen" in mode:
         d = next_school_day(today)
         return day_summary(d) if d else "Keine Schule in Sicht 🎉"
@@ -922,13 +924,87 @@ def watch_morning(now):
     # before leaving: tell if the plan changes (cancelled train, real delay, other connection)
     if now < p["leave"] + dt.timedelta(minutes=2):
         was = s.get(k + ":sig")
-        if was and (was != sig or abs(late - s.get(k + ":late", 0)) >= 3):
+        if was and now >= p["wake"] and (was != sig or abs(late - s.get(k + ":late", 0)) >= 3):
             _cache.pop((today, "m"), None)
-            push("🚆 Planänderung", ("%s hat +%d\n" % (first["line"], late) if late >= 3 else "") + day_summary(today), ["warning"])
+            if first["cncl"] or was != sig:
+                msg = "Neuer Plan: %s %s, los um %s" % (short_line(first), hm(first_dep(b)), hm(p["leave"]))
+            else:
+                msg = "%s %s hat +%d, los um %s" % (short_line(first), hm(first["dep"]), late, hm(p["leave"]))
+            push("🚆 Verspätung" if late >= 3 and was == sig else "❌ Zug fällt aus", msg, ["warning"])
         mark(k + ":sig", sig)
         mark(k + ":late", late)
         if p["wake"] > now:
             mark(k + ":wake", hm(p["wake"]))
+
+def wake_lines(day):
+    m, a = plans(day, ttl=60)
+    if not m.get("best"):
+        return None, []
+    b = m["best"]
+    f = b["legs"][0]
+    late = mins(f["dep_rt"] - f["dep"]) if f["dep_rt"] else 0
+    gone = [s for s in m["skipped"] if s["status"] == "CANCELLED"]
+    lines = [describe(cfg(), m["first"])]
+    lines.append("🚗 %s mit %s, %s %s %s" % (hm(m["leave"]), m["who"], short_line(f), hm(f["dep"]),
+                                         "+%d ⚠️" % late if late >= 2 else "pünktlich ✅"))
+    if m["advice"] == "switch":
+        lines.append("🔁 in %s umsteigen, ich weck dich" % f["to"].split(" ")[0])
+    elif m["advice"] == "stay":
+        lines.append("😴 durchschlafen ok (%s)" % m["teacher"])
+    if a and a["options"]:
+        o = pick_home(a)
+        lines.append("🏠 raus %s, Ternberg %s" % (hm(o["leave"]), hm(o["conn"]["exp"])))
+    if gone:
+        title = "⏰ Guten Morgen! %s. Stunde entfällt" % ".+".join(str(i + 1) for i in range(len(gone)))
+    else:
+        title = "⏰ Guten Morgen! Normaler Tag"
+    return title, lines
+
+
+def wake_briefing(day):
+    # the old 06:08 briefing (weather, prismo) now comes with the day plan, right when he gets up
+    title, lines = wake_lines(day)
+    if not title:
+        return
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("prismo_main", os.path.join(P, "prismo.py"))
+        pm = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pm)
+        pm.briefing(top=lines, title=title)
+    except Exception as e:
+        print("briefing via prismo.py failed: %s" % e, flush=True)
+        push(title, "\n".join(lines), ["sunrise"])
+
+
+def linz_answer():
+    """the phone just arrived at linz hbf: which tram, and on time?"""
+    now = dt.datetime.now().replace(second=0, microsecond=0)
+    today = now.date()
+    lessons = [l for l in untis_lessons(today) if l["end"] > now] if today.weekday() < 5 else []
+    if not lessons or lessons[0]["start"] > now + dt.timedelta(hours=3):
+        return ""  # not on the way to school: stay quiet
+    c = cfg()
+    nxt = lessons[0]
+    walk = room_walk(c, nxt)
+    try:
+        found = [x for x in trips("hbf", "goethe", now, n=3) if judge(x)]
+    except Exception as e:
+        return "ÖBB antwortet nicht (%s)" % e
+    if not found:
+        return ""
+    x = min(found, key=lambda x: x["exp"])
+    l = x["legs"][0]
+    at_class = x["exp"] + dt.timedelta(minutes=walk)
+    late = mins(at_class - nxt["start"])
+    t = teacher(c, nxt)
+    lines = ["🚋 %s %s, %s" % (short_line(l), hm(l["dep_rt"] or l["dep"]), where(l) or "zu Fuß")]
+    if late <= 0:
+        lines.append("🏫 %s in der %s, pünktlich ✅" % (hm(at_class), (nxt["rooms"] or ["Klasse"])[0]))
+    else:
+        lines.append("🏫 %s, %d min zu spät%s" % (hm(at_class), late, " bei %s (%s)" % (t, c["moods"].get(t, "?")) if t else ""))
+    return "\n".join(lines)
+
 
 def watch_steps(now):
     # one push per thing to do, right when it's time: the plan as a guided tour
@@ -944,6 +1020,11 @@ def watch_steps(now):
             continue
         k = "%s:step:%s:%s" % (today.isoformat(), st["head"].split(" ")[0], hm(st["t"])[:4])
         due = st["t"] - dt.timedelta(minutes=st.get("lead", 0))
+        if due <= now < st["t"] + dt.timedelta(minutes=3) and not s.get(k) and st.get("kind") == "wake":
+            mark(k)
+            wake_briefing(today)
+            s = state()
+            continue
         if due <= now < st["t"] + dt.timedelta(minutes=3) and not s.get(k):
             body = [st["detail"]] if st["detail"] else []
             if i + 1 < len(steps):
@@ -983,17 +1064,12 @@ def loop():
             if 5 <= now.hour < 22 and time.time() - last_board > 300:
                 board_tick()
                 last_board = time.time()
-            if now.hour == 21 or (now.hour == 22 and now.minute < 30) or (now.hour == 5 and now.minute >= 40):
-                if now.minute % 15 == 0 or (now.hour == 21 and now.minute < 2) or now.hour == 5:
-                    evening(now if now.hour >= 12 else now - dt.timedelta(days=1))
             if 5 <= now.hour < 10:
                 watch_morning(now)
             if 5 <= now.hour < 20:
                 watch_steps(now)
             if now.minute % 5 == 0:
                 warm(now)
-            if now.weekday() == 6 and now.hour == 19 and now.minute < 2:
-                weekly(now)
         except Exception as e:
             print("loop: %s" % e, flush=True)
         time.sleep(60 - dt.datetime.now().second % 60)

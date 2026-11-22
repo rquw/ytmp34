@@ -149,7 +149,8 @@ def prismo_line(state):
     return bits
 
 
-def briefing():
+def briefing(top=None, title=None):
+    # on school days prismo-day.py calls this at wake-up time, with the day plan on top
     cfg = load(CONFIG, {})
     state = load(STATE, {})
     lines, icon = [], "☀️"
@@ -157,12 +158,14 @@ def briefing():
         icon, lines = weather(cfg)
     except Exception as e:
         lines.append(f"🌡️ Wetter gerade nicht abrufbar ({str(e)[:60]})")
-    changes = untis_today()
+    changes = [] if top else untis_today()  # the day plan already says what's cancelled
+    if top:
+        lines = top + [""] + lines
     if changes:
         lines += ["", "📚 heute anders:"] + changes
     lines += [""] + prismo_line(state)
     day = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"][dt.date.today().weekday()]
-    push(f"{icon} Guten Morgen! Schönen {day}", "\n".join(lines), tags=["sunrise"])
+    push(title or f"{icon} Guten Morgen! Schönen {day}", "\n".join(lines), tags=["sunrise"])
     state["briefing"] = {"at": dt.datetime.now().isoformat(timespec="seconds"), "text": "\n".join(lines)}
     save(STATE, state)
     print("\n".join(lines))
@@ -261,7 +264,14 @@ def watch():
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "status"
     if cmd == "briefing":
-        briefing()
+        # school days: the day planner sends it when the alarm rings, so not twice
+        today = dt.date.today().isoformat()
+        lessons = (load(os.path.join(UNTIS, "state.json"), {}).get("lessons") or {}).values()
+        if os.path.exists(os.path.join(os.path.dirname(CONFIG), "day.json")) and "force" not in sys.argv and any(
+                l["start"].startswith(today) and l.get("status") != "CANCELLED" for l in lessons):
+            print("school day: prismo-day sends the briefing at wake-up")
+        else:
+            briefing()
     elif cmd == "watchdog":
         watchdog()
     elif cmd == "watch":
