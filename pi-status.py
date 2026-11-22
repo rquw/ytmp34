@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HOME = os.path.expanduser("~")
 SERVICES = ["ytmp34", "ytmp34-proxy", "untis-watch.timer", "tailscaled", "ytmp34-update.timer",
-            "prismo-watchdog", "prismo-briefing.timer"]
+            "prismo-watchdog", "prismo-briefing.timer", "prismo-scan"]
 
 
 def read(path, default=""):
@@ -495,8 +495,42 @@ def planes_view():
             "today": len(PLANES["today"]), "overhead": o if o and time.time() - o["at"] < 3600 else None}
 
 
+# camera (prismo-scan.py owns it). it only writes frames while someone looks, so we touch a flag file
+CAM_JPG, CAM_WANT = "/dev/shm/prismo-cam.jpg", "/dev/shm/prismo-cam-want"
+SCAN_KEY = os.path.join(HOME, "prismo", "scan-key")
+
+
+def cam_frame():
+    with open(CAM_WANT, "w"):
+        pass
+    for _ in range(15):  # first look: give the scanner a moment to start writing
+        try:
+            if time.time() - os.path.getmtime(CAM_JPG) < 2:
+                with open(CAM_JPG, "rb") as f:
+                    return f.read()
+        except OSError:
+            pass
+        time.sleep(0.1)
+    return None
+
+
 class Handler(BaseHTTPRequestHandler):
+    def send_bytes(self, code, data, kind):
+        self.send_response(code)
+        self.send_header("Content-Type", kind)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self):
+        if self.path == "/cam.jpg":
+            frame = cam_frame()
+            return self.send_bytes(200, frame, "image/jpeg") if frame else self.send_bytes(503, b"no camera", "text/plain")
+        if self.path == "/scan-key":
+            # oracle picks this up once. tailnet only, like everything here
+            key = read(SCAN_KEY).strip()
+            return self.send_bytes(200, key.encode(), "text/plain") if key else self.send_bytes(404, b"", "text/plain")
         if self.path not in ("/status", "/status?full=1"):
             self.send_response(404)
             self.end_headers()

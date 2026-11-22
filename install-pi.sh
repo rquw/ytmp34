@@ -172,9 +172,38 @@ sudo systemctl daemon-reload
 sudo systemctl enable -q --now prismo-briefing.timer prismo-watchdog
 sudo systemctl restart prismo-watchdog
 
+echo "==> Setting up the scanner (camera reads QR codes and barcodes, piezo chirps)"
+sudo apt-get install -y -qq python3-picamera2 libzbar0 python3-lgpio
+sudo usermod -aG video,gpio "$USER"
+curl -fsSL "$RAW/prismo-scan.py" -o "$HOME/prismo/prismo-scan.py"
+# one secret for the pi, oracle (fetches it from pi-status once) and the computers
+if [ ! -s "$HOME/prismo/scan-key" ]; then
+  (umask 077; python3 -c 'import secrets; print(secrets.token_urlsafe(24))' > "$HOME/prismo/scan-key")
+fi
+sudo tee /etc/systemd/system/prismo-scan.service >/dev/null <<UNIT
+[Unit]
+Description=prismo scanner (camera -> oracle -> mac/pc)
+After=network-online.target
+Wants=network-online.target
+[Service]
+User=$USER
+SupplementaryGroups=video gpio
+ExecStart=/usr/bin/python3 $HOME/prismo/prismo-scan.py
+Nice=10
+Restart=always
+# no camera plugged in: try again every minute, quietly
+RestartSec=60
+[Install]
+WantedBy=multi-user.target
+UNIT
+sudo systemctl daemon-reload
+sudo systemctl enable -q prismo-scan
+sudo systemctl restart prismo-scan
+
 for _ in $(seq 30); do curl -fsS "http://127.0.0.1:$PORT/ping" >/dev/null 2>&1 && break; sleep 2; done
 HOST="$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
 echo
 echo "ytmp34 (slow backup) is at https://$HOST"
 echo "Proxy for Oracle:          socks5h://$(tailscale ip -4):1080"
+echo "Scanner key (paste it into the Mac/Windows app once): $(cat "$HOME/prismo/scan-key")"
 echo "Set up Oracle with:        ssh ubuntu@<oracle-ip> 'PI_PROXY=socks5h://$(tailscale ip -4):1080 bash -s' < setup-oracle.sh"

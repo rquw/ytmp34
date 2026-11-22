@@ -355,6 +355,96 @@ def pie_status():
             "pi": pi, "pi_error": pi_error}
 
 
+# --- scanner: PRISMO reads a code, the computer that was used last opens it ---
+# the key lives in a file called "scan" next to this file. if it's missing, oracle fetches it
+# from the pi once (pi-status, tailnet only). computers keep one cheap long-poll open: /scan/wait
+
+SCAN_KEY = os.path.join(HERE, "scan")
+scan_lock = threading.Condition()
+scan_recent = deque(maxlen=20)
+scan_devices = {}  # id -> {"name", "kind", "seen", "active", "inbox": []}
+scan_n = [0]
+
+
+def scan_key():
+    try:
+        with open(SCAN_KEY) as f:
+            k = f.read().strip()
+        if k:
+            return k
+    except OSError:
+        pass
+    if not PI_STATUS:
+        return ""
+    try:
+        with urllib.request.urlopen(PI_STATUS.rsplit("/", 1)[0] + "/scan-key", timeout=5) as r:
+            k = r.read().decode().strip()
+    except Exception:
+        return ""
+    if len(k) >= 20:
+        with open(os.open(SCAN_KEY, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+            f.write(k)
+        return k
+    return ""
+
+
+def scan_auth(given):
+    k = scan_key()
+    return bool(k) and hmac.compare_digest(given.encode(), k.encode())
+
+
+def scan_push(body):
+    text = str(body.get("text", ""))[:4000]
+    if not text:
+        return 400, {"error": "empty"}
+    now = time.time()
+    with scan_lock:
+        scan_n[0] += 1
+        item = {"id": scan_n[0], "text": text, "type": str(body.get("type", ""))[:20], "at": now, "to": None}
+        # whoever is online (polled in the last 40 s) and was touched most recently
+        alive = [d for d in scan_devices.values() if now - d["seen"] < 40]
+        if alive:
+            d = max(alive, key=lambda d: d["active"])
+            item["to"] = d["name"]
+            d["inbox"].append(item)
+            scan_lock.notify_all()
+        scan_recent.appendleft(item)
+    return 200, {"ok": True, "id": item["id"], "to": item["to"]}
+
+
+def scan_wait(q):
+    dev = q.get("dev", "")[:64]
+    if not dev:
+        return 400, {"error": "no dev"}
+    now = time.time()
+    try:
+        idle = min(max(float(q.get("idle", "0")), 0), 10 ** 7)
+    except ValueError:
+        idle = 10 ** 7
+    with scan_lock:
+        for k, d in list(scan_devices.items()):
+            if now - d["seen"] > 3600:
+                del scan_devices[k]
+        d = scan_devices.setdefault(dev, {"inbox": []})
+        d.update(name=q.get("name", dev)[:40], kind=q.get("kind", "")[:10], seen=now, active=now - idle)
+        end = now + 25
+        while not d["inbox"] and time.time() < end:
+            scan_lock.wait(end - time.time())
+            d["seen"] = time.time()
+        out, d["inbox"] = d["inbox"], []
+    return 200, {"scans": out}
+
+
+def scan_cam():
+    if not PI_STATUS:
+        return 503, b""
+    try:
+        with urllib.request.urlopen(PI_STATUS.rsplit("/", 1)[0] + "/cam.jpg", timeout=4) as r:
+            return 200, r.read()
+    except Exception:
+        return 503, b""
+
+
 # --- rate limits and the queue ---
 
 def allowed(ip, kind):
@@ -514,6 +604,8 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         q = dict(urllib.parse.parse_qsl(u.query))
         self.direct = q.get("direct") == "1"
+        if u.path.startswith("/scan/"):
+            return self.scan_get(u.path, q)
         if u.path == "/ping":
             return self.json(200, {"ok": True, "yt_dlp": yt_dlp.version.__version__, **stats(q.get("v", "")[:32], q.get("a") == "1")})
         if u.path not in ("/info", "/dl"):
@@ -528,6 +620,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         self.direct = False
+        if urllib.parse.urlparse(self.path).path == "/scan/push":
+            if not scan_auth(self.headers.get("X-Scan-Key", "")):
+                return self.json(403, {"error": "key"})
+            try:
+                body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 8000)) or b"{}")
+            except ValueError:
+                body = {}
+            return self.json(*scan_push(body))
         if urllib.parse.urlparse(self.path).path != "/pie":
             return self.json(404, {"error": "not found"})
         try:
@@ -544,6 +644,24 @@ class Handler(BaseHTTPRequestHandler):
         if body.get("full"):
             out["history"] = pie_cache["history"]
         self.json(200, out)
+
+    def scan_get(self, path, q):
+        if not scan_auth(self.headers.get("X-Scan-Key", "")):
+            return self.json(403, {"error": "key"})
+        if path == "/scan/wait":
+            return self.json(*scan_wait(q))
+        if path == "/scan/recent":
+            with scan_lock:
+                return self.json(200, {"scans": list(scan_recent)})
+        if path == "/scan/cam.jpg":
+            code, data = scan_cam()
+            self.send_response(code)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return self.wfile.write(data)
+        self.json(404, {"error": "not found"})
 
     def lookup(self, url, fmt):
         try:
@@ -643,6 +761,8 @@ class Handler(BaseHTTPRequestHandler):
             shutil.rmtree(workdir, ignore_errors=True)
 
     def log_message(self, fmt, *args):
+        if self.path.startswith("/scan/"):
+            return  # long-polls every 25 s would flood the log
         print("%s %s" % (self.ip(), fmt % args))
 
 

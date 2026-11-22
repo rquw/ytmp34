@@ -719,7 +719,7 @@
   // --- the detail cards ---
   function services(svc) {
     const names = { "ytmp34": "Backup-Converter", "ytmp34-proxy": "Proxy", "untis-watch.timer": "Untis", "tailscaled": "Tailscale",
-      "ytmp34-update.timer": "Update", "prismo-watchdog.timer": "Wachhund", "prismo-briefing.timer": "Briefing" };
+      "ytmp34-update.timer": "Update", "prismo-watchdog": "Wachhund", "prismo-briefing.timer": "Briefing", "prismo-scan": "Scanner" };
     return Object.entries(svc || {}).map(([k, v]) => `<span class="pill ${v === "active" ? "ok" : "bad"}">${v === "active" ? "●" : "○"} ${esc(names[k] || k)}</span>`).join("");
   }
 
