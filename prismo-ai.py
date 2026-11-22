@@ -53,9 +53,9 @@ def get_json(url, timeout=15, headers=None):
         return json.loads(r.read())
 
 
-def ollama(model, prompt, system="", images=None, as_json=False, timeout=240):
+def ollama(model, prompt, system="", images=None, as_json=False, timeout=240, limit=400):
     body = {"model": model, "prompt": prompt, "system": system, "stream": False,
-            "options": {"temperature": 0.2, "num_ctx": 2048}}
+            "options": {"temperature": 0.2, "num_ctx": 2048, "num_predict": limit}}
     if images:
         body["images"] = images
     if as_json:
@@ -115,6 +115,7 @@ last_push = {"at": 0}
 EYE_SYSTEM = """Du bist das Auge von PRISMO, einem kleinen Computer in Fabios Zimmer in Ternberg.
 Fabio hat einen kleinen Hund namens Lenny (Biewer Yorkshire). Die Kamera schaut in sein Zimmer.
 Du bekommst eine Bildbeschreibung (englisch) und entscheidest, ob Fabio das wissen will.
+Nutze NUR was in der Bildbeschreibung steht, erfinde nichts dazu. Die Listen unten sind nur Beispiele für Kategorien.
 Interessant: Menschen im Zimmer während Fabio weg ist, Lenny an lustigen oder verbotenen Orten,
 Licht/Bildschirm brennt obwohl niemand da ist, etwas fällt um, Rauch, offenes Fenster bei Regen.
 Langweilig: leeres Zimmer, Licht und Schatten, Fabio selbst wenn er daheim ist, kleine Bewegungen.
@@ -145,8 +146,11 @@ def eye_worker():
 
 def look(img, motion, at):
     b64 = base64.b64encode(img).decode()
-    caption = ollama(VISION, "Describe this photo of a room in one or two sentences. Mention any people, animals, "
-                             "lights, screens and anything unusual.", images=[b64], timeout=180)
+    # moondream answers nothing to long prompts, this one works
+    caption = ollama(VISION, "Describe this image.", images=[b64], timeout=180, limit=90)
+    if not caption:
+        print("eye: no caption", flush=True)
+        return
     fabio = where_is_fabio()
     recent = [s["say"] for s in list(sightings)[-3:]]
     t = dt.datetime.fromtimestamp(at)
@@ -181,13 +185,69 @@ _whisper = {"m": None}
 
 VOICE_SYSTEM = """Du machst aus Fabios Sprachnotiz iPhone-Erinnerungen. Fabio ist Schüler (HTL Linz).
 Regeln:
-- Jede eigene Sache wird eine eigene Erinnerung. "und", "außerdem", "noch was" trennen Sachen.
-- Titel kurz und klar, deutsch, wie Fabio es sagen würde, ohne Füllwörter ("äh", "PRISMO").
-- Datum: nur wenn er eines nennt oder meint (Wochentag, morgen, übermorgen, nächste Woche, Uhrzeit).
-  Wochentage sind immer der nächste solche Tag ab heute. Ohne Uhrzeit: 17:00.
-  Bei Tests/Checks/Prüfungen/Abgaben an einem Tag: Erinnerung am Vorabend 18:00, Titel z. B. "Mathe-Check morgen: lernen".
-- Nichts dazuerfinden, keine Erinnerungen die er nicht gesagt hat.
-Antworte NUR als JSON: {"reminders": [{"title": "...", "due": "YYYY-MM-DDTHH:MM" oder null, "notes": "" }]}"""
+- Jede eigene Sache wird eine eigene Erinnerung, ALLE Sachen, keine vergessen. "und", "außerdem", "noch was" trennen Sachen.
+  Jede Zeitangabe gehört zu der Sache, in deren Satzteil sie steht.
+- title: kurz, deutsch, mit Beträgen und Namen ("Xaver 5 € zurückgeben"), Zahlen als Ziffern,
+  ohne Füllwörter ("äh", "PRISMO") und OHNE Tag/Uhrzeit im Titel.
+- when: die Zeitangabe GENAU mit seinen Worten kopiert (z. B. "am Freitag", "morgen um sieben", "heut um acht"),
+  oder "" wenn er keine nennt. Nicht umrechnen.
+- exam: true NUR bei Test/Check/Schularbeit/Prüfung (da muss er lernen). Abgaben, Termine, Aufgaben: false.
+- notes: Details wie Kapitel oder Seiten, sonst "".
+- Nichts dazuerfinden.
+Beispiel: "PRISMO, Englisch Schularbeit am Freitag Unit 3, und um 8 Mama anrufen, und MEP Abgabe Donnerstag, und Milch kaufen" ->
+{"reminders": [{"title": "Englisch-Schularbeit", "when": "am Freitag", "exam": true, "notes": "Unit 3"},
+ {"title": "Mama anrufen", "when": "um 8", "exam": false, "notes": ""},
+ {"title": "MEP-Abgabe", "when": "Donnerstag", "exam": false, "notes": ""},
+ {"title": "Milch kaufen", "when": "", "exam": false, "notes": ""}]}
+Antworte NUR als JSON in genau dieser Form."""
+
+WEEKDAYS = [("montag", 0), ("dienstag", 1), ("mittwoch", 2), ("donnerstag", 3), ("freitag", 4), ("samstag", 5),
+            ("sonntag", 6)]
+NUMBERS = {"eins": 1, "ein": 1, "zwei": 2, "drei": 3, "vier": 4, "fünf": 5, "sechs": 6, "sieben": 7, "acht": 8,
+           "neun": 9, "zehn": 10, "elf": 11, "zwölf": 12}
+
+
+def due_from(when, exam, now):
+    # the model only copies his words ("morgen um sieben"), the date math happens here. small models can't count days
+    w = " " + (when or "").lower().replace("ü", "ue").replace("zwoelf", "zwölf").replace("fuenf", "fünf") + " "
+    d = None
+    if "uebermorgen" in w:
+        d = now.date() + dt.timedelta(days=2)
+    elif "morgen" in w and "morgens" not in w.replace("morgen ", ""):
+        d = now.date() + dt.timedelta(days=1)
+    elif re.search(r"\bheut", w):
+        d = now.date()
+    elif "naechste woche" in w:
+        d = now.date() + dt.timedelta(days=7 - now.weekday())
+    else:
+        for name, n in WEEKDAYS:
+            if name in w:
+                d = now.date() + dt.timedelta(days=(n - now.weekday() - 1) % 7 + 1)
+    t = None
+    m = re.search(r"\b(\d{1,2})(?:[:.](\d{2}))?\s*(?:uhr)?\b", w) if re.search(r"\bum\b|uhr|:", w) else None
+    if m:
+        h, mi = int(m.group(1)), int(m.group(2) or 0)
+    else:
+        m = re.search(r"\bum (" + "|".join(NUMBERS) + r")\b", w)
+        h, mi = (NUMBERS[m.group(1)], 0) if m else (None, 0)
+    if h is not None and h < 24:
+        if "halb" in w:
+            h, mi = h - 1, 30
+        # "um acht" in the evening means 20:00; morning words or a small hour already passed stay as they are
+        if h < 12 and not re.search(r"früh|frueh|morgens|vormittag", w) and ("abend" in w or "nachmittag" in w or
+                                                                           (h < 7 and "morgen" not in w)):
+            h += 12
+        t = dt.time(h % 24, mi)
+    if d is None and t is None:
+        return None
+    if exam and d:
+        return dt.datetime.combine(d - dt.timedelta(days=1), dt.time(18, 0))
+    if t and t.hour < 12 and d in (None, now.date()) and dt.datetime.combine(now.date(), t) < now:
+        t = t.replace(hour=t.hour + 12)  # "heut um acht" said at noon means 20:00
+    if d is None:
+        # only a time: today if it's still ahead, else tomorrow
+        d = now.date() if dt.datetime.combine(now.date(), t) > now else now.date() + dt.timedelta(days=1)
+    return dt.datetime.combine(d, t or dt.time(17, 0))
 
 
 def transcribe(path):
@@ -207,24 +267,25 @@ def voice(audio, name):
     os.remove(path)
     if not text:
         return {"text": "", "reminders": []}
+    return {"text": text, "reminders": reminders(text)}
+
+
+def reminders(text):
     now = dt.datetime.now()
-    days = ", ".join("%s=%s" % (["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"][(now + dt.timedelta(days=i)).weekday()],
-                                (now + dt.timedelta(days=i)).strftime("%Y-%m-%d")) for i in range(1, 8))
-    prompt = "Jetzt: %s, %s Uhr\nNächste Tage: %s\nSprachnotiz: \"%s\"" % (
-        now.strftime("%Y-%m-%d"), now.strftime("%H:%M"), days, text)
-    j = ollama(TEXT, prompt, system=VOICE_SYSTEM, as_json=True)
+    j = ollama(TEXT, 'Sprachnotiz: "%s"' % text, system=VOICE_SYSTEM, as_json=True)
     out = []
     for r in j.get("reminders", [])[:10]:
         title = str(r.get("title", "")).strip()
-        due = r.get("due")
-        if due:
-            try:
-                due = dt.datetime.fromisoformat(str(due)[:16]).strftime("%Y-%m-%dT%H:%M")
-            except ValueError:
-                due = None
-        if title:
-            out.append({"title": title[:120], "due": due, "notes": str(r.get("notes") or "")[:300]})
-    return {"text": text, "reminders": out}
+        if not title:
+            continue
+        title = re.sub(r"(?i)^prismo[\s,:-]*", "", title).strip(" ,-") or title
+        exam = bool(r.get("exam"))
+        due = due_from(r.get("when"), exam, now)
+        if exam and due:
+            title += " morgen: lernen"
+        out.append({"title": title[:120], "due": due.strftime("%Y-%m-%dT%H:%M") if due else None,
+                    "notes": str(r.get("notes") or "")[:300]})
+    return out
 
 
 # --- daily self-check ---
@@ -326,8 +387,9 @@ def findings(today, past):
         f.append("Untis-Abfrage schlägt seit %d Versuchen fehl" % today["untis_fails"])
     for key, label in (("pi_warnings", "PRISMO"), ("oracle_warnings", "Oracle")):
         m = med(key)
-        if today.get(key, 0) >= 20 and (m is None or today[key] > max(m * 3, 20)):
-            f.append("%s hat heute %d Warnungen im Log (sonst %s)" % (label, today[key], int(m) if m is not None else "?"))
+        # needs a few days of history first: what's normal differs a lot (the scanner without camera is noisy)
+        if m is not None and today.get(key, 0) > max(m * 3, 20):
+            f.append("%s hat heute %d Warnungen im Log (sonst %d)" % (label, today[key], m))
     if today.get("pi_failed"):
         f.append("Abgestürzte Dienste auf PRISMO: %s" % ", ".join(today["pi_failed"]))
     return f
@@ -344,7 +406,9 @@ def check(force=False):
             "\n- ".join(f), json.dumps(past[-7:], ensure_ascii=False)[:2500], "\n".join(notes[-20:])[:2500])
         try:
             j = ollama(TEXT, prompt, system=CHECK_SYSTEM, as_json=True)
-            title, msg = str(j.get("title") or "🩺 PRISMO-Check"), str(j.get("message") or "; ".join(f))
+            title, msg = str(j.get("title") or ""), str(j.get("message") or "; ".join(f))
+            if len(title) < 6:
+                title = "🩺 PRISMO-Check"
         except Exception:
             title, msg = "🩺 PRISMO-Check", "; ".join(f)
         push(title[:60], msg[:500], tags="stethoscope")
