@@ -126,23 +126,22 @@ final class App: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             url = c.url
         }
         guard let u = url else { return }
-        let ws = NSWorkspace.shared
-        if let chrome = ws.urlForApplication(withBundleIdentifier: "com.google.Chrome") {
-            ws.open([u], withApplicationAt: chrome, configuration: NSWorkspace.OpenConfiguration())
-        } else {
-            ws.open(u)
-        }
+        let chrome = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome") != nil
+        launch(chrome ? ["-a", "Google Chrome", u.absoluteString] : [u.absoluteString])
+    }
+
+    // `open` brings the app to the front. NSWorkspace from a menu bar app doesn't always get to
+    func launch(_ args: [String]) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        p.arguments = args
+        try? p.run()
     }
 
     func showImage(_ t: String) {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("prismo-scan", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let preview = { (file: URL) in
-            let ws = NSWorkspace.shared
-            if let app = ws.urlForApplication(withBundleIdentifier: "com.apple.Preview") {
-                ws.open([file], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
-            } else { ws.open(file) }
-        }
+        let preview = { (file: URL) in self.launch(["-a", "Preview", file.path]) }
         if t.hasPrefix("data:image/"), let comma = t.firstIndex(of: ",") {
             let ext = t.dropFirst(11).prefix { $0 != ";" && $0 != "," }
             guard let data = Data(base64Encoded: String(t[t.index(after: comma)...])) else { return }
