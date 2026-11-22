@@ -30,10 +30,11 @@ final class Voice: ObservableObject {
         }
         do {
             let s = AVAudioSession.sharedInstance()
-            try s.setCategory(.record, mode: .spokenAudio)
+            // .spokenAudio is a playback mode, with .record it throws -50
+            try s.setCategory(.record, mode: .default)
             try s.setActive(true)
             let r = try AVAudioRecorder(url: file, settings: [
-                AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 16000, AVNumberOfChannelsKey: 1,
+                AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 22050, AVNumberOfChannelsKey: 1,
                 AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue])
             r.isMeteringEnabled = true
             r.record(forDuration: 120)
