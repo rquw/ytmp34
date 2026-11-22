@@ -533,6 +533,7 @@ def home_coords():
 
 
 SCHOOL = (48.2988, 14.2967)  # around goethestraße 17
+TERNBERG = (47.9430, 14.3590)
 
 
 def now_answer(lat=None, lon=None):
@@ -541,7 +542,8 @@ def now_answer(lat=None, lon=None):
     today = now.date()
     here = (lat, lon) if lat is not None else None
     home = home_coords()
-    at_home = here is None or (home and dist(here, home) < 500)
+    # anywhere in ternberg counts as home: from there it's always the same trip
+    at_home = here is None or dist(here, TERNBERG) < 2500 or bool(home and dist(here, home) < 1500)
     lessons = untis_lessons(today) if today.weekday() < 5 else []
     out = []
 
@@ -557,7 +559,15 @@ def now_answer(lat=None, lon=None):
             out.append("Spätestens los: %s (für %s)" % (hm(plan["leave"]), describe(c, plan["first"])))
         return "\n".join(out) or "Keine Verbindung gefunden"
 
-    if lessons and now < lessons[-1]["end"] and not at_home and here and dist(here, SCHOOL) < 700:
+    if at_home:
+        # nothing left today: show the next school day
+        d = next_school_day(today)
+        if not d:
+            return "Keine Schule in Sicht 🎉"
+        when = "Morgen" if d == today + dt.timedelta(days=1) else "%s %s." % (DAYS[d.weekday()], d.strftime("%d.%m"))
+        return "%s:\n%s" % (when, morning_text(morning(d)))
+
+    if lessons and now < lessons[-1]["end"] and here and dist(here, SCHOOL) < 700:
         a = afternoon(today)
         return afternoon_text(a)
 
