@@ -541,7 +541,7 @@ def in_min(t, now):
 
 def next_step(now):
     today = now.date()
-    steps = timeline(today) if school_day(today) else []
+    steps = timeline(today, ttl=900) if school_day(today) else []
     nxt = [s for s in steps if s["t"] > now]
     if not nxt:
         d = next_school_day(today)
@@ -558,7 +558,7 @@ def next_step(now):
 
 
 def day_summary(d):
-    m, a = plans(d)
+    m, a = plans(d, ttl=900)
     if not m.get("school"):
         return "Keine Schule 🎉"
     if not m.get("best"):
@@ -620,7 +620,7 @@ def home_plan():
     today = dt.date.today()
     if not school_day(today):
         return "Heute keine Schule 🎉"
-    a = afternoon(today)
+    _, a = plans(today, ttl=900)
     if not a or not a["options"]:
         return "Heimweg: nichts gefunden"
     lines = ["Letzte Stunde bis %s%s" % (hm(a["last"]["end"]), " (%s)" % a["teacher"] if a["teacher"] else "")]
@@ -771,17 +771,29 @@ TERNBERG = (47.9430, 14.3590)
 
 
 def answer(mode, lat=None, lon=None):
+    # the menu texts can be anything, so go by keywords
     mode = (mode or "jetzt").lower()
-    if mode.startswith("heim"):
+    today = dt.date.today()
+    if "heim" in mode or "home" in mode:
         return home_now(lat, lon)
-    if mode.startswith("stunden"):
-        return home_plan()
-    if mode.startswith("morgen"):
-        d = next_school_day(dt.date.today())
-        return day_summary(d) if d else "Keine Schule in Sicht 🎉"
-    if mode.startswith("z"):
+    if "zug" in mode or "züge" in mode or "bahn" in mode:
         return next_trains(lat, lon)
+    if "morgen" in mode:
+        d = next_school_day(today)
+        return day_summary(d) if d else "Keine Schule in Sicht 🎉"
+    if "stunden" in mode or "heute" in mode:
+        if not school_day(today):
+            d = next_school_day(today)
+            return "Heute keine Schule 🎉" + ("\n\nNächster Schultag:\n" + day_summary(d) if d else "")
+        return day_summary(today) + "\n\n" + home_plan()
     return next_step(dt.datetime.now().replace(second=0, microsecond=0))
+
+
+def warm(now):
+    # keep today's and the next school day's plan ready, so the button answers instantly
+    for d in {now.date(), next_school_day(now.date())}:
+        if d and school_day(d):
+            plans(d, ttl=600)
 
 
 def now_answer(lat=None, lon=None):
@@ -978,6 +990,8 @@ def loop():
                 watch_morning(now)
             if 5 <= now.hour < 20:
                 watch_steps(now)
+            if now.minute % 5 == 0:
+                warm(now)
             if now.weekday() == 6 and now.hour == 19 and now.minute < 2:
                 weekly(now)
         except Exception as e:
@@ -1036,6 +1050,7 @@ if __name__ == "__main__":
     if cmd == "serve":
         host = sys.argv[sys.argv.index("--host") + 1] if "--host" in sys.argv else "127.0.0.1"
         threading.Thread(target=loop, daemon=True).start()
+        threading.Thread(target=warm, args=(dt.datetime.now(),), daemon=True).start()
         print("prismo-day on %s:8781" % host, flush=True)
         ThreadingHTTPServer((host, 8781), Handler).serve_forever()
     elif cmd == "plan":
