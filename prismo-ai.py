@@ -29,6 +29,7 @@ OLLAMA = "http://127.0.0.1:11434"
 PI = os.environ.get("YTMP34_PI_STATUS", "").rsplit("/", 1)[0]  # http://100.x.y.z:8780
 PI_DAY = PI.rsplit(":", 1)[0] + ":8781" if PI else ""
 TEXT, VISION = "qwen2.5:3b", "moondream"
+WORDS = "qwen2.5:7b"  # voice notes: 3b mangled german words, 7b is slower but that runs in the background anyway
 
 os.makedirs(EYE, exist_ok=True)
 brain = threading.Lock()  # one model at a time: 2 cores, no point in more
@@ -229,9 +230,10 @@ def due_from(when, exam, now):
             if name in w:
                 d = now.date() + dt.timedelta(days=(n - now.weekday() - 1) % 7 + 1)
     t = None
-    m = re.search(r"\b(\d{1,2})(?:[:.](\d{2}))?\s*(?:uhr)?\b", w) if re.search(r"\bum\b|uhr|:", w) else None
+    # "23:15", "23.15", "23 Uhr 15", "um 8"
+    m = re.search(r"\b(\d{1,2})(?:[:.](\d{2})|\s*uhr\s*(\d{1,2})\b)?", w) if re.search(r"\bum\b|uhr|:", w) else None
     if m:
-        h, mi = int(m.group(1)), int(m.group(2) or 0)
+        h, mi = int(m.group(1)), int(m.group(2) or m.group(3) or 0)
     else:
         m = re.search(r"\bum (" + "|".join(NUMBERS) + r")\b", w)
         h, mi = (NUMBERS[m.group(1)], 0) if m else (None, 0)
@@ -247,11 +249,13 @@ def due_from(when, exam, now):
         return None
     if exam and d:
         return dt.datetime.combine(d - dt.timedelta(days=1), dt.time(18, 0))
-    if t and t.hour < 12 and d in (None, now.date()) and dt.datetime.combine(now.date(), t) < now:
+    # said a few minutes ago and processing took a while: still today
+    passed = lambda tt: dt.datetime.combine(now.date(), tt) < now - dt.timedelta(minutes=20)
+    if t and t.hour < 12 and d in (None, now.date()) and passed(t):
         t = t.replace(hour=t.hour + 12)  # "heut um acht" said at noon means 20:00
     if d is None:
-        # only a time: today if it's still ahead, else tomorrow
-        d = now.date() if dt.datetime.combine(now.date(), t) > now else now.date() + dt.timedelta(days=1)
+        # only a time: today unless it's long gone
+        d = now.date() + dt.timedelta(days=1) if passed(t) else now.date()
     return dt.datetime.combine(d, t or dt.time(17, 0))
 
 
@@ -260,7 +264,8 @@ def transcribe(path):
         from faster_whisper import WhisperModel
         _whisper["m"] = WhisperModel("small", device="cpu", compute_type="int8", download_root=os.path.join(AI, "whisper"))
     with brain:
-        segs, _ = _whisper["m"].transcribe(path, language="de", vad_filter=True, beam_size=1)
+        segs, _ = _whisper["m"].transcribe(path, language="de", vad_filter=True, beam_size=5,
+                                           initial_prompt="Hund füttern um 18 Uhr, rausgehen, Mathe-Check am Mittwoch, Xaver anrufen.")
         return " ".join(s.text.strip() for s in segs).strip()
 
 
@@ -277,7 +282,8 @@ def voice(audio, name):
 
 def reminders(text):
     now = dt.datetime.now()
-    j = ollama(TEXT, 'Sprachnotiz: "%s"' % text, system=VOICE_SYSTEM, as_json=True)
+    j = ollama(WORDS, 'Sprachnotiz: "%s"' % text, system=VOICE_SYSTEM, as_json=True, timeout=400)
+    print("voice: %s -> %s" % (text, json.dumps(j, ensure_ascii=False)), flush=True)
     out = []
     for r in j.get("reminders", [])[:10]:
         title = str(r.get("title", "")).strip()

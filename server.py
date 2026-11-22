@@ -692,7 +692,7 @@ class Handler(BaseHTTPRequestHandler):
         req = urllib.request.Request("http://127.0.0.1:8790" + u.path[3:] + ("?" + qs if qs else ""),
                                      data=body, method=method, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=180) as r:
+            with urllib.request.urlopen(req, timeout=420) as r:
                 data, kind, code = r.read(), r.headers.get("Content-Type", "application/json"), r.status
         except urllib.error.HTTPError as e:
             data, kind, code = e.read(), "application/json", e.code

@@ -96,7 +96,8 @@ final class Uploader: NSObject, URLSessionDataDelegate {
         let c = URLSessionConfiguration.background(withIdentifier: Uploader.id)
         c.sessionSendsLaunchEvents = true
         c.isDiscretionary = false
-        c.timeoutIntervalForResource = 600
+        c.timeoutIntervalForResource = 900
+        c.timeoutIntervalForRequest = 420  // oracle stays silent while it thinks, don't give up after the default 60 s
         return URLSession(configuration: c, delegate: self, delegateQueue: nil)
     }()
 

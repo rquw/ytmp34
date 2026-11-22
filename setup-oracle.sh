@@ -98,6 +98,7 @@ printf '[Service]\nEnvironment=OLLAMA_HOST=127.0.0.1:11434\nEnvironment=OLLAMA_M
   sudo tee /etc/systemd/system/ollama.service.d/prismo.conf >/dev/null
 sudo systemctl daemon-reload && sudo systemctl restart ollama && sleep 3
 ollama pull qwen2.5:3b
+ollama pull qwen2.5:7b
 ollama pull moondream
 [ -d "$HOME/ai/venv" ] || python3 -m venv "$HOME/ai/venv"
 "$HOME/ai/venv/bin/pip" install -q -U pip faster-whisper "av<14"
