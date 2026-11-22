@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 
 // PRISMO's status, the same data as pie mode on the ytmp34 site. refreshes every 3 s while it's open
 struct StatusView: View {
@@ -6,6 +7,8 @@ struct StatusView: View {
     @State private var error = ""
     @State private var morse = ""
     @State private var ledReply = ""
+    @State private var cam: UIImage?
+    @State private var camOn = false
 
     private var pi: [String: Any] { d["pi"] as? [String: Any] ?? [:] }
     private var oracle: [String: Any] { d["oracle"] as? [String: Any] ?? [:] }
@@ -19,9 +22,11 @@ struct StatusView: View {
                         Label(error, systemImage: "wifi.exclamationmark").foregroundStyle(.orange)
                     }
                     prismoSection
+                    cameraSection
+                    ledSection
+                    internetSection
                     servicesSection
                     watchdogSection
-                    ledSection
                     oracleSection
                     planesSection
                 }
@@ -32,6 +37,17 @@ struct StatusView: View {
             while !Task.isCancelled {
                 await load()
                 try? await Task.sleep(for: .seconds(3))
+            }
+        }
+        .task(id: camOn) {
+            // live picture only while the switch is on and the tab is open
+            while camOn && !Task.isCancelled {
+                if let data = try? await API.get("/scan/cam.jpg", [:], timeout: 6), let img = UIImage(data: data) {
+                    cam = img
+                } else {
+                    cam = nil
+                }
+                try? await Task.sleep(for: .milliseconds(400))
             }
         }
     }
@@ -90,11 +106,71 @@ struct StatusView: View {
         }
     }
 
+    private var cameraSection: some View {
+        section("camera.fill") {
+            Toggle(isOn: $camOn) { Text("Live").font(.system(size: 15, weight: .semibold)) }
+                .tint(.purple)
+            if camOn {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14).fill(Color.black)
+                    if let cam {
+                        Image(uiImage: cam).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 14))
+                    } else {
+                        Image(systemName: "eye.slash").font(.system(size: 28)).foregroundStyle(.secondary)
+                    }
+                }
+                .aspectRatio(4 / 3, contentMode: .fit)
+            }
+        }
+    }
+
+    private var internetSection: some View {
+        let n = pi["net_watch"] as? [String: Any] ?? [:]
+        let speeds = (n["speeds"] as? [[Any]] ?? []).compactMap { s -> (Date, Double, Double)? in
+            guard s.count >= 3 else { return nil }
+            return (Date(timeIntervalSince1970: num(s[0])), num(s[1]), num(s[2]))
+        }
+        let outages = (n["outages"] as? [[Any]] ?? []).reversed().prefix(5)
+        let online = n["online"] as? Bool ?? true
+        let f = DateFormatter()
+        f.dateFormat = "E HH:mm"
+        f.locale = Locale(identifier: "de_AT")
+        return section("globe") {
+            HStack(spacing: 10) {
+                tile(online ? "wifi" : "wifi.slash", online ? "online" : "weg", online ? .green : .red)
+                tile("timer", n["ping"] != nil ? String(format: "%.0f ms", num(n["ping"])) : "?", .white)
+                tile("arrow.down", speeds.last.map { String(format: "%.0f", $0.1) } ?? "?", .white)
+                tile("arrow.up", speeds.last.map { String(format: "%.0f", $0.2) } ?? "?", .white)
+            }
+            if speeds.count > 1 {
+                Chart {
+                    ForEach(Array(speeds.enumerated()), id: \.offset) { _, s in
+                        LineMark(x: .value("Zeit", s.0), y: .value("Mbit/s", s.1)).foregroundStyle(by: .value("", "↓"))
+                        LineMark(x: .value("Zeit", s.0), y: .value("Mbit/s", s.2)).foregroundStyle(by: .value("", "↑"))
+                    }
+                }
+                .chartForegroundStyleScale(["↓": Color.purple, "↑": Color.green])
+                .frame(height: 140)
+            }
+            ForEach(Array(outages.enumerated()), id: \.offset) { _, o in
+                let a = Date(timeIntervalSince1970: num(o.first)), b = Date(timeIntervalSince1970: num(o.last))
+                HStack {
+                    Image(systemName: "bolt.horizontal.fill").foregroundStyle(.orange).font(.system(size: 12))
+                    Text(f.string(from: a)).font(.system(size: 14, design: .monospaced))
+                    Spacer()
+                    Text("\(max(1, Int(b.timeIntervalSince(a) / 60))) min weg").font(.system(size: 13)).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
     private var ledSection: some View {
         section("lightbulb.fill") {
             HStack(spacing: 10) {
-                ledButton("heart.fill", "heartbeat")
-                ledButton("light.beacon.max.fill", "blink")
+                ledButton("heart.fill", "heart")
+                ledButton("light.beacon.max.fill", "wave")
+                ledButton("speaker.wave.2.fill", "find")
+                ledButton("bell.fill", "chime")
                 TextField("Morse", text: $morse)
                     .textFieldStyle(.plain).padding(10)
                     .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.07)))
@@ -172,7 +248,7 @@ struct StatusView: View {
         Task {
             let data = try? await API.get("/scan/led", ["action": action, "text": text], timeout: 10)
             let j = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]) ?? [:]
-            ledReply = (j["error"] as? String) ?? (j["ok"] != nil ? "💡" : "")
+            ledReply = (j["error"] as? String) ?? (j["message"] as? String) ?? ""
             if action == "morse" { morse = "" }
         }
     }

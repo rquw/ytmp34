@@ -72,6 +72,23 @@ sudo systemctl daemon-reload
 sudo systemctl enable -q ytmp34 ytmp34-update.timer
 sudo systemctl restart ytmp34 ytmp34-update.timer
 
+echo "==> Keeping the VM from looking idle (oracle reclaims always-free VMs under 20 % ram/cpu/network)"
+curl -fsSL "$RAW/keepalive.py" -o "$D/keepalive.py"
+sudo tee /etc/systemd/system/prismo-keepalive.service >/dev/null <<UNIT
+[Unit]
+Description=keeps ram use above oracle's idle limit
+[Service]
+User=$USER
+ExecStart=/usr/bin/python3 $D/keepalive.py
+Nice=19
+Restart=always
+RestartSec=30
+[Install]
+WantedBy=multi-user.target
+UNIT
+sudo systemctl daemon-reload
+sudo systemctl enable -q --now prismo-keepalive
+
 echo "==> Opening ports 80/443 and setting up https"
 # oracle's ubuntu image rejects everything not explicitly allowed
 REJ=$(sudo iptables -S INPUT | grep -n -- '-j REJECT' | head -1 | cut -d: -f1 || true)

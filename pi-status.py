@@ -263,6 +263,7 @@ def status():
         **slow_parts(),
         "led": {"what": led_busy["what"], "left": max(0, round(led_busy["until"] - time.time(), 1))},
         "planes": planes_view(),
+        "net_watch": net_view(),
     }
 
 
@@ -328,6 +329,8 @@ def heartbeat(n=4):
 
 def led_action(body):
     action = body.get("action")
+    if action in TUNES:
+        return piezo_play(action)
     if led_busy["what"]:
         return 409, {"error": "Das Licht ist gerade beschäftigt ✨", "left": round(led_busy["until"] - time.time(), 1)}
     if action in ("heart", "pet"):
@@ -342,6 +345,106 @@ def led_action(body):
     else:
         return 400, {"error": "unbekannte Aktion"}
     return 200, {"ok": True, "message": msg, "seconds": round(secs, 1)}
+
+
+# ---------------------------------------------------------------------------------------------
+# internet watch: a ping every 30 s (outages), a small speed test every 3 hours. kept for 7 days
+
+NET = os.path.join(HOME, "prismo", "net.json")
+NET_STATE = {"online": True, "ping": None}
+
+
+def ping_ms(host):
+    try:
+        r = subprocess.run(["ping", "-c", "1", "-W", "2", host], capture_output=True, text=True, timeout=5)
+        m = re.search(r"time=([0-9.]+)", r.stdout)
+        return float(m.group(1)) if r.returncode == 0 and m else None
+    except Exception:
+        return None
+
+
+def speedtest():
+    t = time.time()
+    with urllib.request.urlopen("https://speed.cloudflare.com/__down?bytes=10000000", timeout=60) as r:
+        n = len(r.read())
+    down = n * 8 / (time.time() - t) / 1e6
+    data = os.urandom(2000000)
+    t = time.time()
+    req = urllib.request.Request("https://speed.cloudflare.com/__up", data=data, method="POST")
+    urllib.request.urlopen(req, timeout=60).read()
+    up = len(data) * 8 / (time.time() - t) / 1e6
+    return round(down, 1), round(up, 1)
+
+
+def netwatch():
+    net = load(NET, {}) or {}
+    net.setdefault("speeds", [])
+    net.setdefault("outages", [])
+    while True:
+        now = time.time()
+        p = ping_ms("1.1.1.1") or ping_ms("8.8.8.8")
+        NET_STATE.update(online=p is not None, ping=p)
+        changed = False
+        if p is None and not net.get("down_since"):
+            net["down_since"], changed = now, True
+        elif p is not None and net.get("down_since"):
+            if now - net["down_since"] >= 60:
+                net["outages"] = (net["outages"] + [[net["down_since"], now]])[-50:]
+            net["down_since"], changed = None, True
+        last = net["speeds"][-1][0] if net["speeds"] else 0
+        if p is not None and now - last > 3 * 3600:
+            try:
+                down, up = speedtest()
+                net["speeds"] = [s for s in net["speeds"] if now - s[0] < 7 * 86400] + [[now, down, up, p]]
+            except Exception:
+                net["speeds"] = net["speeds"] + [[now, 0, 0, p]]
+            changed = True
+        if changed:
+            with open(NET + ".tmp", "w") as f:
+                json.dump(net, f)
+            os.replace(NET + ".tmp", NET)
+        time.sleep(30)
+
+
+def net_view():
+    net = load(NET, {}) or {}
+    return {"online": NET_STATE["online"], "ping": NET_STATE["ping"], "down_since": net.get("down_since"),
+            "speeds": net.get("speeds", [])[-56:], "outages": net.get("outages", [])[-20:]}
+
+
+# ---------------------------------------------------------------------------------------------
+# the piezo (KY-006 on GPIO19): little sounds from the app
+
+TUNES = {"find": [(2600, 0.12), (0, 0.08)] * 6,
+         "chime": [(1047, 0.12), (1319, 0.12), (1568, 0.12), (2093, 0.3)],
+         "siren": [(f, 0.03) for f in list(range(800, 2400, 80)) + list(range(2400, 800, -80))] * 2}
+piezo_busy = {"until": 0}
+
+
+def piezo_play(name):
+    try:
+        import lgpio
+    except ImportError:
+        return 503, {"error": "kein Piezo-Treiber (lgpio fehlt)"}
+    if time.time() < piezo_busy["until"]:
+        return 409, {"error": "PRISMO piept gerade schon 🔊"}
+    notes = TUNES[name]
+    piezo_busy["until"] = time.time() + sum(t for _, t in notes)
+
+    def run():
+        try:
+            h = lgpio.gpiochip_open(0)
+            lgpio.gpio_claim_output(h, 19)
+            for f, t in notes:
+                lgpio.tx_pwm(h, 19, f, 50 if f else 0)
+                time.sleep(t)
+            lgpio.tx_pwm(h, 19, 0, 0)
+            lgpio.gpio_write(h, 19, 0)
+            lgpio.gpiochip_close(h)
+        except Exception as e:
+            print("piezo: %s" % e, flush=True)
+    threading.Thread(target=run, daemon=True).start()
+    return 200, {"ok": True, "message": "PRISMO piept 🔊"}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -575,4 +678,5 @@ if __name__ == "__main__":
     history_load()
     threading.Thread(target=sample, daemon=True).start()
     threading.Thread(target=planes_loop, daemon=True).start()
+    threading.Thread(target=netwatch, daemon=True).start()
     ThreadingHTTPServer((a.host, a.port), Handler).serve_forever()
