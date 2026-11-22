@@ -625,7 +625,56 @@ def compact(x):
     return " → ".join("%s %s" % (short_line(l), hm(l["dep_rt"] or l["dep"])) for l in x["legs"])
 
 
+def stop_name(n):
+    return n.split(" (")[0].replace("Linz/Donau ", "Linz ").replace(" Bahnhst", " Bahnhof")
+
+
+def route_list(frm, to, arrive_label, n=4):
+    """the next ways from here to there: where to get on, when to walk off, when you're there"""
+    now = dt.datetime.now().replace(second=0, microsecond=0)
+    try:
+        found = [x for x in trips(frm, to, now, n=6) if judge(x)]
+    except Exception as e:
+        return "ÖBB antwortet nicht (%s)" % e
+    best = {}
+    for x in sorted(found, key=lambda x: (x["exp"], -first_dep(x).timestamp())):
+        best.setdefault(hm(x["exp"]), x)  # per arrival, the one you can leave latest for
+    found = sorted(best.values(), key=lambda x: first_dep(x))[:n]
+    if not found:
+        return "Keine Verbindung gefunden"
+    lines, last_station = [], None
+    for i, x in enumerate(found):
+        station = stop_name(x["legs"][0]["from"])
+        walk = x["walk_first"] or 0
+        go = first_dep(x) - dt.timedelta(minutes=walk)
+        if station != last_station:
+            if lines:
+                lines.append("")
+            lines.append("📍 ab %s%s" % (station, " (%d min zu Fuß)" % walk if walk else ""))
+            last_station = station
+        lines.append("%s los %s → %s %s" % ("🏃" if i == 0 else "   ", in_min(go, now) if i == 0 else "um " + hm(go),
+                                         arrive_label, hm(x["exp"])))
+        lines.append("     " + compact(x))
+    return "\n".join(lines)
+
+
+def to_linz(lat=None, lon=None):
+    here = (lat, lon) if lat is not None else None
+    if here and dist(here, (48.30, 14.29)) < 6000:
+        return "Du bist schon in Linz 😄"
+    return "Nächste Züge nach Linz\n" + route_list(here or home_coords() or "bf", "hbf", "Linz Hbf")
+
+
 def home_now(lat=None, lon=None):
+    """fastest way home from wherever he is, walking to the nearest stop included"""
+    here = (lat, lon) if lat is not None else None
+    if here and dist(here, TERNBERG) < 2500:
+        return "Du bist eh schon in Ternberg 😄"
+    home = home_coords()
+    return "Wie komm ich heim?!\n" + route_list(here or "goethe", home or "bf", "daheim" if home else "Ternberg")
+
+
+def home_now_old(lat=None, lon=None):
     """fastest way home from here, right now"""
     now = dt.datetime.now().replace(second=0, microsecond=0)
     here = (lat, lon) if lat is not None else None
@@ -894,7 +943,9 @@ def answer(mode, lat=None, lon=None, date=None):
     today = dt.date.today()
     if "heim" in mode or "home" in mode:
         return home_now(lat, lon)
-    if "zug" in mode or "züge" in mode or "bahn" in mode:
+    if "nachlinz" in mode or "nach linz" in mode or "zug" in mode or "züge" in mode or "zuege" in mode:
+        return to_linz(lat, lon)
+    if "abfahrt" in mode:
         return next_trains(lat, lon)
     if "linz" in mode:
         record("hbf_arrive")

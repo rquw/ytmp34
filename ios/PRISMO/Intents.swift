@@ -5,9 +5,9 @@ enum AskMode: String, AppEnum {
 
     static var typeDisplayRepresentation: TypeDisplayRepresentation = "Frage"
     static var caseDisplayRepresentations: [AskMode: DisplayRepresentation] = [
-        .jetzt: DisplayRepresentation(title: "Was jetzt?", image: .init(systemName: "arrow.right.circle.fill")),
-        .zuege: DisplayRepresentation(title: "Züge ab jetzt", image: .init(systemName: "tram.fill")),
-        .heim: DisplayRepresentation(title: "Wie komm ich heim?", image: .init(systemName: "house.fill")),
+        .jetzt: DisplayRepresentation(title: "Nächster Schritt", image: .init(systemName: "arrow.right.circle.fill")),
+        .zuege: DisplayRepresentation(title: "Züge nach Linz", image: .init(systemName: "tram.fill")),
+        .heim: DisplayRepresentation(title: "Wie komm ich heim?!", image: .init(systemName: "house.fill")),
         .heute: DisplayRepresentation(title: "Heute", image: .init(systemName: "calendar")),
         .morgen: DisplayRepresentation(title: "Morgen", image: .init(systemName: "moon.stars.fill")),
     ]

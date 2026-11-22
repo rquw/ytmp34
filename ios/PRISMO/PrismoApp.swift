@@ -78,25 +78,30 @@ struct PlannerView: View {
     @State private var loading = false
     @State private var alarms = Alarms.scheduled
 
-    private let modes: [(String, String)] = [
-        ("jetzt", "arrow.right.circle.fill"), ("zuege", "tram.fill"), ("heim", "house.fill"), ("morgen", "moon.stars.fill"),
+    private let modes: [(String, String, String)] = [
+        ("jetzt", "arrow.right.circle.fill", "Nächster Schritt"), ("nachlinz", "tram.fill", "Züge nach Linz"),
+        ("heim", "house.fill", "Wie komm ich heim?!"), ("morgen", "moon.stars.fill", "Morgen"),
     ]
 
     var body: some View {
         VStack(spacing: 0) {
             TitleBar(title: "PLANER", alarms: alarms)
-            HStack(spacing: 8) {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
                 ForEach(modes, id: \.0) { m in
                     Button {
                         mode = m.0
                         Task { await load() }
                     } label: {
-                        Image(systemName: m.1)
-                            .font(.system(size: 22, weight: .semibold))
-                            .frame(maxWidth: .infinity, minHeight: 50)
-                            .background(RoundedRectangle(cornerRadius: 14)
-                                .fill(mode == m.0 ? Color.purple.opacity(0.55) : Color.white.opacity(0.07)))
-                            .foregroundStyle(.white)
+                        HStack(spacing: 8) {
+                            Image(systemName: m.1).font(.system(size: 18, weight: .semibold)).frame(width: 24)
+                            Text(m.2).font(.system(size: 14, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 12)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .background(RoundedRectangle(cornerRadius: 14)
+                            .fill(mode == m.0 ? Color.purple.opacity(0.55) : Color.white.opacity(0.07)))
+                        .foregroundStyle(.white)
                     }
                 }
             }
