@@ -24,6 +24,10 @@
 	<string>PRISMO weiß so, wo du auf dem Schulweg bist.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Damit PRISMO merkt, ob du im Zug sitzt, auch wenn die App zu ist. Nur an Bahnhof, Schule und Zuhause.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Für Sprachnotizen, die PRISMO in Erinnerungen verwandelt.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>PRISMO legt aus deinen Sprachnotizen Erinnerungen an.</string>
 	<key>NSAlarmKitUsageDescription</key>
 	<string>PRISMO stellt deinen Wecker nach Stundenplan und Zügen.</string>
 </dict>

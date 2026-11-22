@@ -9,6 +9,8 @@ struct StatusView: View {
     @State private var ledReply = ""
     @State private var cam: UIImage?
     @State private var camOn = false
+    @State private var sightings: [[String: Any]] = []
+    @State private var checkReply = ""
 
     private var pi: [String: Any] { d["pi"] as? [String: Any] ?? [:] }
     private var oracle: [String: Any] { d["oracle"] as? [String: Any] ?? [:] }
@@ -24,7 +26,9 @@ struct StatusView: View {
                     prismoSection
                     cameraSection
                     ledSection
+                    eyeSection
                     internetSection
+                    checkSection
                     servicesSection
                     watchdogSection
                     oracleSection
@@ -34,8 +38,11 @@ struct StatusView: View {
             }
         }
         .task {
+            var n = 0
             while !Task.isCancelled {
                 await load()
+                if n % 10 == 0 { await loadSightings() }
+                n += 1
                 try? await Task.sleep(for: .seconds(3))
             }
         }
@@ -121,6 +128,52 @@ struct StatusView: View {
                 }
                 .aspectRatio(4 / 3, contentMode: .fit)
             }
+        }
+    }
+
+    // what the AI saw: the last few things worth looking at
+    private var eyeSection: some View {
+        let shown = sightings.filter { ($0["interesting"] as? Bool) ?? false }.prefix(6)
+        return section("eye.fill") {
+            if shown.isEmpty {
+                Text(sightings.isEmpty ? "Noch nichts gesehen" : "Nur Langweiliges gesehen 😴")
+                    .font(.system(size: 14)).foregroundStyle(.secondary)
+            }
+            ForEach(Array(shown.enumerated()), id: \.offset) { _, s in
+                HStack(spacing: 12) {
+                    AsyncImage(url: API.url("/ai/img/\(s["id"] as? String ?? "0")")) { img in
+                        img.resizable().scaledToFill()
+                    } placeholder: { Color.white.opacity(0.06) }
+                    .frame(width: 72, height: 54).clipShape(RoundedRectangle(cornerRadius: 8))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(s["say"] as? String ?? "").font(.system(size: 14, weight: .semibold)).lineLimit(2)
+                        Text(Date(timeIntervalSince1970: num(s["at"])).formatted(.dateTime.weekday(.abbreviated).hour().minute())
+                             + "  \(Int(num(s["howmuch"])))%")
+                            .font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    // the daily self-check, on demand
+    private var checkSection: some View {
+        section("stethoscope") {
+            Button {
+                checkReply = "PRISMO untersucht sich …"
+                Task {
+                    let data = try? await API.get("/ai/check", ["run": "1"], timeout: 180)
+                    let j = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]) ?? [:]
+                    checkReply = (j["message"] as? String) ?? (j["error"] as? String) ?? "Keine Antwort"
+                }
+            } label: {
+                Label("Jetzt durchchecken", systemImage: "waveform.path.ecg")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple.opacity(0.4)))
+                    .foregroundStyle(.white)
+            }
+            if !checkReply.isEmpty { Text(checkReply).font(.system(size: 14)).foregroundStyle(.secondary) }
         }
     }
 
@@ -250,6 +303,13 @@ struct StatusView: View {
             let j = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]) ?? [:]
             ledReply = (j["error"] as? String) ?? (j["message"] as? String) ?? ""
             if action == "morse" { morse = "" }
+        }
+    }
+
+    private func loadSightings() async {
+        if let data = try? await API.get("/ai/sightings", [:], timeout: 10),
+           let j = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            sightings = j
         }
     }
 

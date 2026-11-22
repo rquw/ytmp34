@@ -4,6 +4,8 @@ import CoreLocation
 @main
 struct PrismoApp: App {
     @Environment(\.scenePhase) private var phase
+    @ObservedObject private var voice = Voice.shared
+    @State private var showVoice = false
 
     init() {
         _ = Tracker.shared  // region events relaunch the app in the background: be ready for them
@@ -19,6 +21,17 @@ struct PrismoApp: App {
             .tint(.purple)
             .preferredColorScheme(.dark)
             .onAppear { Tracker.shared.start() }
+            .overlay(alignment: .bottomTrailing) {
+                // voice note: one button, everywhere in the app
+                Button { showVoice = true } label: {
+                    Image(systemName: "mic.fill").font(.system(size: 22, weight: .bold)).foregroundStyle(.white)
+                        .frame(width: 58, height: 58)
+                        .background(Circle().fill(Color.purple).shadow(color: .purple.opacity(0.5), radius: 10))
+                }
+                .padding(.trailing, 20).padding(.bottom, 96)
+            }
+            .sheet(isPresented: $showVoice) { VoiceView().presentationDetents([.large]) }
+            .onChange(of: voice.startRequested) { _, go in if go { showVoice = true } }
         }
         .onChange(of: phase) { _, p in
             if p == .active { Task { await Alarms.refresh() } }

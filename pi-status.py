@@ -621,6 +621,17 @@ def cam_frame():
     return None
 
 
+def health():
+    # warnings in the journal over the last day, and crashed services (for the daily check on oracle)
+    try:
+        out = subprocess.run(["journalctl", "--since", "-24h", "-p", "warning", "-o", "cat", "--no-pager"],
+                             capture_output=True, text=True, timeout=40).stdout.strip().splitlines()
+    except Exception:
+        out = []
+    failed = [l.split()[0] for l in sh("systemctl", "--failed", "--plain", "--no-legend").splitlines() if l.strip()]
+    return {"warnings": len(out), "lines": [l[:160] for l in out[-30:]], "failed": failed}
+
+
 class Handler(BaseHTTPRequestHandler):
     def send_bytes(self, code, data, kind):
         self.send_response(code)
@@ -634,6 +645,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/cam.jpg":
             frame = cam_frame()
             return self.send_bytes(200, frame, "image/jpeg") if frame else self.send_bytes(503, b"no camera", "text/plain")
+        if self.path == "/health":
+            return self.send_bytes(200, json.dumps(health()).encode(), "application/json")
         if self.path == "/scan-key":
             # oracle picks this up once. tailnet only, like everything here
             key = read(SCAN_KEY).strip()

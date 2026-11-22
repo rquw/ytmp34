@@ -480,6 +480,12 @@ def record(e):
         _cache.pop((now.date(), "a"), None)
 
 
+def where_answer():
+    # for the eye on oracle: is he home? last home crossing today decides, no info = home
+    ev = [e for _, e in events(dt.date.today()) if e.startswith("home_")]
+    return {"home": not ev or ev[-1] == "home_arrive"}
+
+
 def tracking():
     # only once the iphone automations are set up does PRISMO trust missing events
     return bool(state().get("ev_ever"))
@@ -1306,6 +1312,8 @@ class Handler(BaseHTTPRequestHandler):
                 lat, lon = q.get("lat"), q.get("lon")
                 f = lambda v: float(v.replace(",", ".")) if v else None
                 return self.reply(200, answer(q.get("mode"), f(lat), f(lon), q.get("date")))
+            if u.path == "/day/where":
+                return self.reply(200, json.dumps(where_answer()), "application/json")
             if u.path == "/day/days":
                 return self.reply(200, json.dumps(known_days(), ensure_ascii=False), "application/json")
             if u.path == "/day/places":

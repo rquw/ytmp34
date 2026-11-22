@@ -19,6 +19,8 @@ ORACLE = os.environ.get("PRISMO_ORACLE", "https://132-226-199-122.sslip.io")
 KEY_FILE = os.path.join(HOME, "prismo", "scan-key")
 CAM_JPG, CAM_WANT = "/dev/shm/prismo-cam.jpg", "/dev/shm/prismo-cam-want"
 FPS = 5          # scans per second while idle
+MOTION = 0.04    # share of the picture that has to change to count as movement
+EYE_EVERY = 45   # at most one snapshot to the eye every this many seconds
 SAME_AGAIN = 8   # the same code counts again only after it was out of view this long (s)
 PIEZO_PIN = 19
 
@@ -113,7 +115,19 @@ def chirp(ok=True):
     threading.Thread(target=run, daemon=True).start()
 
 
+def to_eye(jpeg, motion):
+    def run():
+        try:
+            req = urllib.request.Request(ORACLE + "/ai/see", data=jpeg, headers={
+                "Content-Type": "image/jpeg", "X-Scan-Key": key(), "X-Motion": "%.3f" % motion})
+            urllib.request.urlopen(req, timeout=20).read()
+        except Exception as e:
+            print("eye send failed: %s" % e, flush=True)
+    threading.Thread(target=run, daemon=True).start()
+
+
 def main():
+    import numpy as np
     from picamera2 import Picamera2
     from libcamera import Transform
 
@@ -130,6 +144,7 @@ def main():
     print("prismo-scan running, sending to %s" % ORACLE, flush=True)
 
     last_text, last_seen = None, 0.0
+    bg, moving, last_eye, started = None, 0, 0.0, time.time()
     while True:
         t0 = time.time()
         watching = False
@@ -152,6 +167,23 @@ def main():
         else:
             yuv = cam.capture_array("lores")
         gray = bytearray(yuv[:H, :W].tobytes())  # the Y plane is already a grayscale picture
+
+        # movement: a tiny 80x60 copy against a slowly adapting background
+        small = yuv[:H:8, :W:8].astype(np.float32)
+        if bg is None:
+            bg = small
+        frac = float((np.abs(small - bg) > 25).mean())
+        bg = bg * 0.9 + small * 0.1
+        moving = moving + 1 if frac > MOTION else 0
+        if moving >= 2 and t0 - last_eye > EYE_EVERY and t0 - started > 15:
+            last_eye = t0
+            req = cam.capture_request()
+            try:
+                buf = io.BytesIO()
+                req.make_image("main").save(buf, format="JPEG", quality=80)
+            finally:
+                req.release()
+            to_eye(buf.getvalue(), frac)
 
         for text, kind in zbar.scan(gray, W, H)[:1]:
             if text == last_text and t0 - last_seen < SAME_AGAIN:

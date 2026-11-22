@@ -89,6 +89,35 @@ UNIT
 sudo systemctl daemon-reload
 sudo systemctl enable -q --now prismo-keepalive
 
+echo "==> PRISMO's brain (ollama + small models + whisper, one model at a time)"
+mkdir -p "$HOME/ai"
+command -v ollama >/dev/null || curl -fsSL https://ollama.com/install.sh | sh
+sudo mkdir -p /etc/systemd/system/ollama.service.d
+printf '[Service]\nEnvironment=OLLAMA_HOST=127.0.0.1:11434\nEnvironment=OLLAMA_MAX_LOADED_MODELS=1\nEnvironment=OLLAMA_NUM_PARALLEL=1\nEnvironment=OLLAMA_KEEP_ALIVE=3m\n' |
+  sudo tee /etc/systemd/system/ollama.service.d/prismo.conf >/dev/null
+sudo systemctl daemon-reload && sudo systemctl restart ollama && sleep 3
+ollama pull qwen2.5:3b
+ollama pull moondream
+[ -d "$HOME/ai/venv" ] || python3 -m venv "$HOME/ai/venv"
+"$HOME/ai/venv/bin/pip" install -q -U pip faster-whisper
+curl -fsSL "$RAW/prismo-ai.py" -o "$D/prismo-ai.py"
+sudo tee /etc/systemd/system/prismo-ai.service >/dev/null <<UNIT
+[Unit]
+Description=PRISMO brain (eye, voice notes, daily check)
+After=network-online.target ollama.service
+[Service]
+User=$USER
+Environment=YTMP34_PI_STATUS=http://$PROXY_HOST:8780/status
+ExecStart=$HOME/ai/venv/bin/python $D/prismo-ai.py
+Nice=10
+Restart=always
+RestartSec=10
+[Install]
+WantedBy=multi-user.target
+UNIT
+sudo systemctl daemon-reload
+sudo systemctl enable -q --now prismo-ai
+
 echo "==> Opening ports 80/443 and setting up https"
 # oracle's ubuntu image rejects everything not explicitly allowed
 REJ=$(sudo iptables -S INPUT | grep -n -- '-j REJECT' | head -1 | cut -d: -f1 || true)

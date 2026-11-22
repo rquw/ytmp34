@@ -608,6 +608,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.scan_get(u.path, q)
         if u.path.startswith("/day/"):
             return self.day_get()
+        if u.path.startswith("/ai/"):
+            return self.ai_proxy("GET")
         if u.path == "/ping":
             return self.json(200, {"ok": True, "yt_dlp": yt_dlp.version.__version__, **stats(q.get("v", "")[:32], q.get("a") == "1")})
         if u.path not in ("/info", "/dl"):
@@ -622,6 +624,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         self.direct = False
+        if urllib.parse.urlparse(self.path).path.startswith("/ai/"):
+            return self.ai_proxy("POST")
         if urllib.parse.urlparse(self.path).path == "/scan/push":
             if not scan_auth(self.headers.get("X-Scan-Key", "")):
                 return self.json(403, {"error": "key"})
@@ -670,6 +674,35 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return self.wfile.write(data)
         self.json(404, {"error": "not found"})
+
+    def ai_proxy(self, method):
+        # PRISMO's brain (prismo-ai.py, localhost:8790): eye snapshots, voice notes, the daily check
+        u = urllib.parse.urlparse(self.path)
+        q = urllib.parse.parse_qsl(u.query)
+        if not scan_auth(self.headers.get("X-Scan-Key", "") or dict(q).get("key", "")):
+            return self.json(403, {"error": "key"})
+        body = None
+        if method == "POST":
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > 16 * 2**20:
+                return self.json(413, {"error": "zu groß"})
+            body = self.rfile.read(n)
+        qs = urllib.parse.urlencode([(k, v) for k, v in q if k != "key"])
+        headers = {k: self.headers[k] for k in ("Content-Type", "X-Motion", "X-Filename") if self.headers.get(k)}
+        req = urllib.request.Request("http://127.0.0.1:8790" + u.path[3:] + ("?" + qs if qs else ""),
+                                     data=body, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=180) as r:
+                data, kind, code = r.read(), r.headers.get("Content-Type", "application/json"), r.status
+        except urllib.error.HTTPError as e:
+            data, kind, code = e.read(), "application/json", e.code
+        except Exception:
+            data, kind, code = b'{"error": "PRISMOs Gehirn schl\u00e4ft"}', "application/json", 504
+        self.send_response(code)
+        self.send_header("Content-Type", kind)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def day_get(self):
         # the phone (action button, alarm shortcut) asks prismo's day planner, through here
@@ -791,7 +824,7 @@ class Handler(BaseHTTPRequestHandler):
             shutil.rmtree(workdir, ignore_errors=True)
 
     def log_message(self, fmt, *args):
-        if self.path.startswith(("/scan/", "/day/")):
+        if self.path.startswith(("/scan/", "/day/", "/ai/")):
             return  # long-polls and locations every 25 s would flood the log
         print("%s %s" % (self.ip(), fmt % args))
 
