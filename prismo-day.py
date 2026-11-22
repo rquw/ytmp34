@@ -445,6 +445,236 @@ def afternoon(day):
     return out
 
 
+# --- the day as steps: what to do when. the button and the pushes both read this ---
+
+_cache = {}
+
+
+def cached(key, fn, ttl=60):
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    val = fn()
+    _cache[key] = (time.time(), val)
+    return val
+
+
+def plans(day, ttl=60):
+    m = cached((day, "m"), lambda: morning(day), ttl)
+    a = cached((day, "a"), lambda: afternoon(day), ttl) if m.get("school") else None
+    return m, a
+
+
+def short_line(l):
+    return l["line"].replace("Tram ", "Bim ")
+
+
+def where(l):
+    if "Tiefgescho" in l["from"]:
+        return "unten im Tiefgeschoß"
+    return "Gleis %s" % l["plat"] if l.get("plat") else ""
+
+
+def ride_steps(conn, push_first=False):
+    steps, legs = [], conn["legs"]
+    for i, l in enumerate(legs):
+        dep = l["dep_rt"] or l["dep"]
+        nxt = legs[i + 1] if i + 1 < len(legs) else None
+        arr, _ = guess(l, "arr")
+        if i == 0:
+            detail = where(l)
+            if nxt and trains(conn) > 1 and mins(arr - dep) >= 15 and not short_line(nxt).startswith("Bim"):
+                detail += (", " if detail else "") + "schlaf, ich weck dich %s" % hm(arr - dt.timedelta(minutes=4))
+            steps.append({"t": dep, "icon": "🚋" if short_line(l).startswith("Bim") else "🚆",
+                          "head": "%s %s" % (short_line(l), hm(dep)), "detail": detail, "push": push_first, "lead": 0})
+        else:
+            prev = legs[i - 1]
+            prev_arr, _ = guess(prev, "arr")
+            city = short_line(l).startswith(("Bim", "Bus")) and short_line(l) != "Bus 440"
+            place_name = prev["to"].split(" (")[0].replace("Linz/Donau ", "Linz ").replace(" Bahnhof", "").replace(" Bahnhst", "")
+            t = max(prev_arr - dt.timedelta(minutes=3), (prev["dep_rt"] or prev["dep"]) + dt.timedelta(minutes=1))
+            steps.append({"t": t, "icon": "🚋" if city else "🔁",
+                          "head": "%s %s: %s %s" % ("Raus in" if city else "Umsteigen in", place_name, short_line(l), hm(dep)),
+                          "detail": where(l), "push": True, "lead": 0, "loud": not city})
+    return steps
+
+
+def pick_home(a):
+    return next((o for o in a["options"] if o["rule"] and o["rule"].get("sure")), a["options"][-1])
+
+
+def timeline(day, ttl=60):
+    m, a = plans(day, ttl)
+    steps = []
+    if m.get("best"):
+        b = m["best"]
+        ride = m["comfy"] if m["advice"] == "stay" and m["comfy"] else b
+        stop = STOP_NAME[b["stop"]]
+        who = m["who"] if b["stop"] == "bf" else "%s (oder %s zu Fuß)" % (m["who"], hm(m["walk_leave"]))
+        steps.append({"t": m["wake"], "icon": "⏰", "head": "Aufstehen", "detail": "um %s los" % hm(m["leave"]), "push": False})
+        steps.append({"t": m["leave"], "icon": "🚗", "head": "Los mit %s" % who,
+                      "detail": "%s, %s %s" % (stop, short_line(b["legs"][0]), hm(first_dep(b))), "push": True, "lead": 2})
+        rides = ride_steps(ride)
+        if ride is not b:
+            rides[0]["detail"] = "durchschlafen, %s ist %s 😴" % (m["teacher"], m["mood"])
+        steps += rides
+        steps.append({"t": ride["exp"], "icon": "🏫", "head": "%d min zur %s" % (m["walk"], (m["first"]["rooms"] or ["Klasse"])[0]),
+                      "detail": describe(cfg(), m["first"]), "push": False})
+    if a and a["options"]:
+        o = pick_home(a)
+        other = [x for x in a["options"] if x is not o and hm(x["conn"]["exp"]) != hm(o["conn"]["exp"])]
+        detail = "%s %s, Ternberg %s" % (short_line(o["conn"]["legs"][0]), hm(first_dep(o["conn"])), hm(o["conn"]["exp"]))
+        if other:
+            x = other[0]
+            detail += "\n(%s: um %s raus = Ternberg %s)" % (x["rule"]["note"] if x["rule"] else "oder", hm(x["leave"]), hm(x["conn"]["exp"]))
+        steps.append({"t": o["leave"], "icon": "🔔", "head": "Raus aus der Klasse", "detail": detail, "push": True, "lead": 5})
+        steps += ride_steps(o["conn"])
+        steps.append({"t": o["conn"]["exp"], "icon": "🏠", "head": "Ternberg an", "detail": "", "push": False})
+    steps.sort(key=lambda s: s["t"])
+    return steps
+
+
+def in_min(t, now):
+    n = mins(t - now)
+    return "jetzt" if n <= 0 else "in %d min" % n if n < 90 else "um %s" % hm(t)
+
+
+def next_step(now):
+    today = now.date()
+    steps = timeline(today) if school_day(today) else []
+    nxt = [s for s in steps if s["t"] > now]
+    if not nxt:
+        d = next_school_day(today)
+        if not d:
+            return "Keine Schule in Sicht 🎉"
+        return "Heute nichts mehr.\n\n" + day_summary(d)
+    n = nxt[0]
+    lines = ["%s %s (%s)" % (n["icon"], n["head"], in_min(n["t"] - dt.timedelta(minutes=n.get("lead", 0)), now))]
+    if n["detail"]:
+        lines.append(n["detail"])
+    if len(nxt) > 1:
+        lines += ["", "danach %s %s %s" % (hm(nxt[1]["t"]), nxt[1]["icon"], nxt[1]["head"])]
+    return "\n".join(lines)
+
+
+def day_summary(d):
+    m, a = plans(d)
+    if not m.get("school"):
+        return "Keine Schule 🎉"
+    if not m.get("best"):
+        return "%s\n%s" % (describe(cfg(), m["first"]), m.get("error", ""))
+    b = m["best"]
+    today = dt.date.today()
+    when = "Heute" if d == today else "Morgen" if d == today + dt.timedelta(days=1) else DAYS[d.weekday()]
+    lines = ["%s: %s" % (when, describe(cfg(), m["first"]))]
+    gone = [s for s in m["skipped"] if s["status"] == "CANCELLED"]
+    if gone:
+        lines.append("❌ davor entfällt (%s)" % ", ".join(hm(s["start"]) for s in gone))
+    lines.append("⏰ %s   🚗 %s mit %s" % (hm(m["wake"]), hm(m["leave"]), m["who"]))
+    ride = "🚆 %s %s" % (short_line(b["legs"][0]), hm(first_dep(b)))
+    if m["advice"] == "switch":
+        ride += ", 🔁 %s %s" % (b["legs"][0]["to"].split(" ")[0], short_line(b["legs"][1]))
+    elif m["advice"] == "stay":
+        ride += ", durchschlafen ok 😴"
+    lines.append(ride)
+    used = m["comfy"] if m["advice"] == "stay" and m["comfy"] else b
+    lines.append("🏫 %s in der Klasse" % hm(used["exp"] + dt.timedelta(minutes=m["walk"])))
+    if a and a["options"]:
+        o = pick_home(a)
+        lines.append("🏠 raus %s, Ternberg %s" % (hm(o["leave"]), hm(o["conn"]["exp"])))
+    return "\n".join(lines)
+
+
+def compact(x):
+    return " → ".join("%s %s" % (short_line(l), hm(l["dep_rt"] or l["dep"])) for l in x["legs"])
+
+
+def home_now(lat=None, lon=None):
+    """fastest way home from here, right now"""
+    now = dt.datetime.now().replace(second=0, microsecond=0)
+    here = (lat, lon) if lat is not None else None
+    if here and dist(here, TERNBERG) < 2500:
+        return "Du bist eh schon in Ternberg 😄"
+    at_school = not here or dist(here, SCHOOL) < 700
+    walk = 5 if at_school else 0
+    try:
+        found = [x for x in trips("goethe" if at_school else here, "bf", now + dt.timedelta(minutes=walk), n=4) if judge(x)]
+    except Exception as e:
+        return "ÖBB antwortet nicht (%s)" % e
+    if not found:
+        return "Keine Verbindung gefunden"
+    found.sort(key=lambda x: (x["exp"], len(x["legs"])))
+    lines = []
+    for i, x in enumerate(found[:2]):
+        go = first_dep(x) - dt.timedelta(minutes=walk + (x["walk_first"] or 0))
+        lines.append("%s los %s, Ternberg %s" % ("🏃" if i == 0 else "oder", in_min(go, now), hm(x["exp"])))
+        lines.append("   " + compact(x))
+    return "\n".join(lines)
+
+
+def home_plan():
+    today = dt.date.today()
+    if not school_day(today):
+        return "Heute keine Schule 🎉"
+    a = afternoon(today)
+    if not a or not a["options"]:
+        return "Heimweg: nichts gefunden"
+    lines = ["Letzte Stunde bis %s%s" % (hm(a["last"]["end"]), " (%s)" % a["teacher"] if a["teacher"] else "")]
+    seen, same = set(), False
+    for o in a["options"]:
+        if hm(o["conn"]["exp"]) in seen:
+            same = True
+            continue
+        seen.add(hm(o["conn"]["exp"]))
+        lines.append("%s raus %s: Ternberg %s" % ("🏃" if o["rule"] else "🔔", hm(o["leave"]), hm(o["conn"]["exp"])))
+        lines.append("   " + compact(o["conn"]))
+        if o["rule"]:
+            lines.append("   " + o["rule"]["note"])
+    if same:
+        lines.append("(früher gehen bringt heute nix, gleicher Zug)")
+    return "\n".join(lines)
+
+
+LINE_DIRS = ("Steyr", "Garsten", "Ternberg", "Weyer", "Kleinreifling", "Losenstein", "Großraming")
+
+
+def next_trains(lat=None, lon=None):
+    """just the next departures that matter from where he is"""
+    now = dt.datetime.now().replace(second=0, microsecond=0)
+    here = (lat, lon) if lat is not None else None
+    in_ternberg = here is None or dist(here, TERNBERG) < 2500
+    if in_ternberg or (here and dist(here, SCHOOL) < 700):
+        stops = [("bf", None), ("schulen", None)] if in_ternberg else [("hbf", LINE_DIRS)]
+        rows = []
+        for stop, dirs in stops:
+            try:
+                r = mgate({"meth": "StationBoard", "req": {"type": "DEP", "stbLoc": place(stop), "maxJny": 30,
+                                                          "date": now.strftime("%Y%m%d"), "time": now.strftime("%H%M%S"), "dur": 180}})
+            except Exception as e:
+                return "ÖBB antwortet nicht (%s)" % e
+            prods = r["common"]["prodL"]
+            for j in r.get("jnyL", []):
+                d = j.get("dirTxt", "")
+                if dirs and not any(w in d for w in dirs):
+                    continue
+                st = j["stbStop"]
+                base = dt.datetime.strptime(j["date"], "%Y%m%d").date()
+                s, rt = htime(base, st.get("dTimeS")), htime(base, st.get("dTimeR"))
+                late = mins(rt - s) if rt else 0
+                cncl = j.get("isCncl") or st.get("dCncl")
+                name = prods[j["prodX"]].get("name", "?").split(" (")[0]
+                rows.append((s, "%s %s → %s%s" % (hm(s), name, d.replace(" Bahnhof", "").replace("Linz/Donau Hbf", "Linz"),
+                                                   " ❌" if cncl else " (+%d)" % late if late >= 2 else "")))
+        rows.sort()
+        head = "Ab Ternberg:" if in_ternberg else "Ab Linz Hbf Richtung Steyr:"
+        return "\n".join([head] + [r[1] for r in rows[:6]]) if rows else "Gerade fährt nix 💤"
+    try:
+        found = [x for x in trips(here, "bf", now, n=4) if judge(x)]
+    except Exception as e:
+        return "ÖBB antwortet nicht (%s)" % e
+    return "\n".join(["Nach Ternberg:"] + ["%s (an %s)" % (compact(x), hm(x["exp"])) for x in found[:4]]) or "Nix gefunden"
+
+
 # --- words ---
 
 def conn_text(x, short=False):
@@ -534,6 +764,20 @@ def home_coords():
 
 SCHOOL = (48.2988, 14.2967)  # around goethestraße 17
 TERNBERG = (47.9430, 14.3590)
+
+
+def answer(mode, lat=None, lon=None):
+    mode = (mode or "jetzt").lower()
+    if mode.startswith("heim"):
+        return home_now(lat, lon)
+    if mode.startswith("stunden"):
+        return home_plan()
+    if mode.startswith("morgen"):
+        d = next_school_day(dt.date.today())
+        return day_summary(d) if d else "Keine Schule in Sicht 🎉"
+    if mode.startswith("z"):
+        return next_trains(lat, lon)
+    return next_step(dt.datetime.now().replace(second=0, microsecond=0))
 
 
 def now_answer(lat=None, lon=None):
@@ -635,11 +879,13 @@ def evening(now):
     if not p.get("wake"):
         return
     s = state()
+    _cache.pop((day, "m"), None)
+    _cache.pop((day, "a"), None)
     if key not in s:
-        push("🌙 Morgen (%s)" % DAYS[day.weekday()], morning_text(p), ["calendar"])
+        push("🌙 Morgen", day_summary(day), ["calendar"])
         mark(key, hm(p["wake"]))
     elif s[key] != hm(p["wake"]):
-        push("🔄 Neuer Plan für morgen", morning_text(p), ["warning"])
+        push("🔄 Neuer Plan für morgen", day_summary(day), ["warning"])
         mark(key, hm(p["wake"]))
 
 
@@ -661,39 +907,38 @@ def watch_morning(now):
     if now < p["leave"] + dt.timedelta(minutes=2):
         was = s.get(k + ":sig")
         if was and (was != sig or abs(late - s.get(k + ":late", 0)) >= 3):
-            push("🚆 Planänderung", morning_text(p), ["warning"])
+            _cache.pop((today, "m"), None)
+            push("🚆 Planänderung", ("%s hat +%d\n" % (first["line"], late) if late >= 3 else "") + day_summary(today), ["warning"])
         mark(k + ":sig", sig)
         mark(k + ":late", late)
         if p["wake"] > now:
             mark(k + ":wake", hm(p["wake"]))
 
-    # on the train: wake him up before st. valentin if switching matters
-    if p["advice"] == "switch" and trains(b) > 1 and not s.get(k + ":wakeup"):
-        arr, _ = guess(b["legs"][0], "arr")
-        if first_dep(b) <= now and arr - dt.timedelta(minutes=4) <= now < arr:
-            sw = b["legs"][1]
-            push("📢 AUFWACHEN, umsteigen!", "%s in %d min. Raus und rüber in den %s (Gleis %s, ab %s). %s" % (
-                b["legs"][0]["to"].split(" ")[0], max(mins(arr - now), 0), sw["line"], sw["plat"] or "?",
-                hm(sw["dep_rt"] or sw["dep"]), "%s wartet nicht 😈" % p["teacher"] if p["mood"] == "devil" else ""), ["rotating_light"])
-            mark(k + ":wakeup")
-
-
-def watch_afternoon(now):
+def watch_steps(now):
+    # one push per thing to do, right when it's time: the plan as a guided tour
     today = now.date()
-    lessons = untis_lessons(today) if today.weekday() < 5 else []
-    if not lessons:
+    if not school_day(today):
         return
-    k = today.isoformat() + ":home"
-    if state().get(k):
-        return
-    c = cfg()
-    last = lessons[-1]
-    t = teacher(c, last)
-    rule = next((e for e in c["early"] if e.get("teacher") == t and e.get("day", DAYS[today.weekday()]) == DAYS[today.weekday()]), None)
-    first_out = at(today, rule["at"]) if rule and at(today, rule["at"]) < last["end"] else last["end"]
-    if first_out - dt.timedelta(minutes=20) <= now < last["end"]:
-        push("🏠 Heimweg", afternoon_text(afternoon(today)), ["house"])
-        mark(k)
+    steps = timeline(today, ttl=600)
+    if any(s["push"] and 0 <= mins(s["t"] - now) <= 25 for s in steps):
+        steps = timeline(today, ttl=60)  # something's coming up: keep it live
+    s = state()
+    for i, st in enumerate(steps):
+        if not st["push"]:
+            continue
+        k = "%s:step:%s:%s" % (today.isoformat(), st["head"].split(" ")[0], hm(st["t"])[:4])
+        due = st["t"] - dt.timedelta(minutes=st.get("lead", 0))
+        if due <= now < st["t"] + dt.timedelta(minutes=3) and not s.get(k):
+            body = [st["detail"]] if st["detail"] else []
+            if i + 1 < len(steps):
+                n = steps[i + 1]
+                body.append("danach %s %s %s" % (hm(n["t"]), n["icon"], n["head"]))
+            title = "%s %s" % (st["icon"], st["head"])
+            if st.get("lead"):
+                title += " (in %d min)" % max(mins(st["t"] - now), 0)
+            push(title, "\n".join(body), ["rotating_light"] if st.get("loud") else [])
+            mark(k)
+            s = state()
 
 
 def weekly(now):
@@ -727,8 +972,8 @@ def loop():
                     evening(now if now.hour >= 12 else now - dt.timedelta(days=1))
             if 5 <= now.hour < 10:
                 watch_morning(now)
-            if 11 <= now.hour < 19:
-                watch_afternoon(now)
+            if 5 <= now.hour < 20:
+                watch_steps(now)
             if now.weekday() == 6 and now.hour == 19 and now.minute < 2:
                 weekly(now)
         except Exception as e:
@@ -754,7 +999,7 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/day/now":
                 lat, lon = q.get("lat"), q.get("lon")
                 f = lambda v: float(v.replace(",", ".")) if v else None
-                return self.reply(200, now_answer(f(lat), f(lon)))
+                return self.reply(200, answer(q.get("mode"), f(lat), f(lon)))
             if u.path == "/day/alarm":
                 return self.reply(200, json.dumps(alarm_answer(), ensure_ascii=False), "application/json")
             if u.path == "/day/plan":
@@ -795,3 +1040,14 @@ if __name__ == "__main__":
         print(now_answer(*(float(x) for x in sys.argv[2:4])) if len(sys.argv) > 3 else now_answer())
     elif cmd == "alarm":
         print(alarm_answer())
+    elif cmd == "steps":
+        d = dt.date.fromisoformat(sys.argv[2])
+        for st in timeline(d):
+            print("%s %s %s%s | %s" % (hm(st["t"]), st["icon"], st["head"], " [push]" if st["push"] else "", st["detail"].replace("\n", " ")))
+        print()
+        print(day_summary(d))
+        if len(sys.argv) > 3:  # pretend it's this time: what does the button say?
+            print()
+            print(next_step(dt.datetime.combine(d, dt.time(int(sys.argv[3][:2]), int(sys.argv[3][3:5])))))
+    elif cmd == "ask":
+        print(answer(sys.argv[2], *(float(x) for x in sys.argv[3:5])) if len(sys.argv) > 4 else answer(sys.argv[2]))
