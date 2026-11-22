@@ -187,7 +187,7 @@ VOICE_SYSTEM = """Du machst aus Fabios Sprachnotiz iPhone-Erinnerungen. Fabio is
 Regeln:
 - Jede eigene Sache wird eine eigene Erinnerung, ALLE Sachen, keine vergessen. "und", "außerdem", "noch was" trennen Sachen.
   Jede Zeitangabe gehört zu der Sache, in deren Satzteil sie steht.
-- title: kurz, deutsch, mit Beträgen und Namen ("Xaver 5 € zurückgeben"), Zahlen als Ziffern,
+- title: aus SEINEN Wörtern, kurz, deutsch, mit Beträgen und Namen ("Xaver 5 € zurückgeben"), Zahlen als Ziffern,
   ohne Füllwörter ("äh", "PRISMO") und OHNE Tag/Uhrzeit im Titel.
 - when: die Zeitangabe GENAU mit seinen Worten kopiert (z. B. "am Freitag", "morgen um sieben", "heut um acht"),
   oder "" wenn er keine nennt. Nicht umrechnen.
@@ -210,6 +210,11 @@ NUMBERS = {"eins": 1, "ein": 1, "zwei": 2, "drei": 3, "vier": 4, "fünf": 5, "se
 def due_from(when, exam, now):
     # the model only copies his words ("morgen um sieben"), the date math happens here. small models can't count days
     w = " " + (when or "").lower().replace("ü", "ue").replace("zwoelf", "zwölf").replace("fuenf", "fünf") + " "
+    # "in 10 Minuten", "in einer Stunde", "in einer halben Stunde"
+    rel = re.search(r"\bin (?:einer |einem )?(halben |(\d+|" + "|".join(NUMBERS) + r") )?(minute|minuten|stunde|stunden)\b", w)
+    if rel:
+        n = 0.5 if rel.group(1) == "halben " else int(NUMBERS.get(rel.group(2), rel.group(2))) if rel.group(2) else 1
+        return now + dt.timedelta(minutes=n * (60 if rel.group(3).startswith("stunde") else 1))
     d = None
     if "uebermorgen" in w:
         d = now.date() + dt.timedelta(days=2)

@@ -1,14 +1,38 @@
 import SwiftUI
 import CoreLocation
 
+import UserNotifications
+
+// background uploads (voice notes) wake the app through here, and pushes also show while the app is open
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
+
+    func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        Uploader.shared.finished = completionHandler
+        _ = Uploader.shared.session
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification)
+        async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
+    }
+}
+
 @main
 struct PrismoApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var phase
     @ObservedObject private var voice = Voice.shared
     @State private var showVoice = false
 
     init() {
         _ = Tracker.shared  // region events relaunch the app in the background: be ready for them
+        _ = Uploader.shared.session  // picks up voice notes still uploading from last time
     }
 
     var body: some Scene {
@@ -31,7 +55,12 @@ struct PrismoApp: App {
                 .padding(.trailing, 20).padding(.bottom, 96)
             }
             .sheet(isPresented: $showVoice) { VoiceView().presentationDetents([.large]) }
-            .onChange(of: voice.startRequested) { _, go in if go { showVoice = true } }
+            .onChange(of: voice.startRequested) { _, go in
+                if go {
+                    showVoice = true
+                    voice.startRequested = false
+                }
+            }
         }
         .onChange(of: phase) { _, p in
             if p == .active { Task { await Alarms.refresh() } }
