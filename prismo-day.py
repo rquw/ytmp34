@@ -603,7 +603,11 @@ def home_now(lat=None, lon=None):
         return "ÖBB antwortet nicht (%s)" % e
     if not found:
         return "Keine Verbindung gefunden"
-    found.sort(key=lambda x: (x["exp"], len(x["legs"])))
+    found.sort(key=lambda x: (x["exp"], -first_dep(x).timestamp()))
+    best = {}
+    for x in found:  # per arrival time keep the one you can leave latest for
+        best.setdefault(hm(x["exp"]), x)
+    found = sorted(best.values(), key=lambda x: x["exp"])
     lines = []
     for i, x in enumerate(found[:2]):
         go = first_dep(x) - dt.timedelta(minutes=walk + (x["walk_first"] or 0))
@@ -665,7 +669,7 @@ def next_trains(lat=None, lon=None):
                 name = prods[j["prodX"]].get("name", "?").split(" (")[0]
                 rows.append((s, "%s %s → %s%s" % (hm(s), name, d.replace(" Bahnhof", "").replace("Linz/Donau Hbf", "Linz"),
                                                    " ❌" if cncl else " (+%d)" % late if late >= 2 else "")))
-        rows.sort()
+        rows = sorted(set(rows))
         head = "Ab Ternberg:" if in_ternberg else "Ab Linz Hbf Richtung Steyr:"
         return "\n".join([head] + [r[1] for r in rows[:6]]) if rows else "Gerade fährt nix 💤"
     try:
