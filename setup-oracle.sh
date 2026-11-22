@@ -100,7 +100,7 @@ sudo systemctl daemon-reload && sudo systemctl restart ollama && sleep 3
 ollama pull qwen2.5:3b
 ollama pull moondream
 [ -d "$HOME/ai/venv" ] || python3 -m venv "$HOME/ai/venv"
-"$HOME/ai/venv/bin/pip" install -q -U pip faster-whisper
+"$HOME/ai/venv/bin/pip" install -q -U pip faster-whisper "av<14"
 curl -fsSL "$RAW/prismo-ai.py" -o "$D/prismo-ai.py"
 sudo tee /etc/systemd/system/prismo-ai.service >/dev/null <<UNIT
 [Unit]
