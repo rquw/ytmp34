@@ -459,8 +459,44 @@ def cached(key, fn, ttl=60):
     return val
 
 
+# --- where he really is: the iphone reports arriving at / leaving a few places (ios geofences, no battery) ---
+# home, bf (ternberg bahnhof), schulen, valentin, steyr, hbf (linz), school. events look like "bf_arrive"
+
+def events(day):
+    return [(dt.datetime.fromisoformat(t), e) for t, e in state().get(day.isoformat() + ":ev", [])]
+
+
+def record(e):
+    now = dt.datetime.now().replace(microsecond=0)
+    key = now.date().isoformat() + ":ev"
+    s = state()
+    mark(key, s.get(key, []) + [[now.isoformat(), e[:30]]])
+    mark("ev_ever", True)
+    day = now.date().isoformat()
+    if e == "home_leave" and s.get(day + ":quiet"):
+        mark(day + ":quiet", False)  # he's going after all: plan from now
+        mark(day + ":replan", now.isoformat())
+        _cache.pop((now.date(), "m"), None)
+        _cache.pop((now.date(), "a"), None)
+
+
+def tracking():
+    # only once the iphone automations are set up does PRISMO trust missing events
+    return bool(state().get("ev_ever"))
+
+
+def boarded(day, dep):
+    # left the station area around departure time = on the train/bus
+    return any(e in ("bf_leave", "schulen_leave") and t >= dep - dt.timedelta(minutes=8) for t, e in events(day))
+
+
+def effective_morning(day):
+    r = state().get(day.isoformat() + ":replan")
+    return morning(day, earliest=dt.datetime.fromisoformat(r)) if r else morning(day)
+
+
 def plans(day, ttl=60):
-    m = cached((day, "m"), lambda: morning(day), ttl)
+    m = cached((day, "m"), lambda: effective_morning(day), ttl)
     a = cached((day, "a"), lambda: afternoon(day), ttl) if m.get("school") else None
     return m, a
 
@@ -779,6 +815,7 @@ def answer(mode, lat=None, lon=None):
     if "zug" in mode or "züge" in mode or "bahn" in mode:
         return next_trains(lat, lon)
     if "linz" in mode:
+        record("hbf_arrive")
         return linz_answer()
     if "morgen" in mode:
         d = next_school_day(today)
@@ -911,11 +948,13 @@ def watch_morning(now):
     today = now.date()
     if not school_day(today):
         return
-    p = morning(today)
+    p, _ = plans(today, ttl=60)
     if not p.get("best"):
         return
     k = today.isoformat()
     s = state()
+    if s.get(k + ":quiet"):
+        return
     b = p["best"]
     first = b["legs"][0]
     sig = "%s %s" % (first["name"], hm(first["dep"]))
@@ -935,6 +974,32 @@ def watch_morning(now):
         mark(k + ":late", late)
         if p["wake"] > now:
             mark(k + ":wake", hm(p["wake"]))
+
+    # missed it? still home or still on the platform after it left
+    dep = first_dep(b)
+    if tracking() and dep + dt.timedelta(minutes=3) <= now < p["first"]["start"] and not boarded(today, dep) \
+            and not s.get(k + ":missed:" + sig):
+        mark(k + ":missed:" + sig)
+        if not any(e == "home_leave" for _, e in events(today)):
+            # never left the house: sick or no school for him today. say it once, then shut up
+            mark(k + ":quiet", True)
+            push("🛋️ Heute daheim?", "%s ist weg und du warst nicht unterwegs. Ich bin heute ruhig, außer du gehst doch los." % short_line(first), [])
+            return
+        mark(k + ":replan", now.isoformat())
+        _cache.pop((today, "m"), None)
+        _cache.pop((today, "a"), None)
+        p2, _ = plans(today, ttl=60)
+        if not p2.get("best"):
+            push("❌ %s verpasst" % short_line(first), "Keine Verbindung mehr gefunden", ["warning"])
+            return
+        b2 = p2["best"]
+        f2 = b2["legs"][0]
+        mark(k + ":sig", "%s %s" % (f2["name"], hm(f2["dep"])))
+        late2 = p2["late"]
+        msg = ["Nächster: %s %s ab %s, los um %s" % (short_line(f2), hm(first_dep(b2)), STOP_NAME[b2["stop"]], hm(p2["leave"])),
+               "🏫 %s in der Klasse%s" % (hm(b2["exp"] + dt.timedelta(minutes=p2["walk"])),
+                                         ", %d min zu spät bei %s" % (late2, p2["teacher"]) if late2 > 0 and p2["teacher"] else "")]
+        push("❌ %s %s verpasst" % (short_line(first), hm(first["dep"])), "\n".join(msg), ["warning"])
 
 def wake_lines(day):
     m, a = plans(day, ttl=60)
@@ -1025,6 +1090,16 @@ def watch_steps(now):
             wake_briefing(today)
             s = state()
             continue
+        if s.get(today.isoformat() + ":quiet") and st["t"] < (plans(today, ttl=600)[0].get("first") or {}).get("start", now):
+            continue
+        if due <= now < st["t"] + dt.timedelta(minutes=3) and not s.get(k) and tracking():
+            m, _ = plans(today, ttl=600)
+            morning_step = m.get("best") and st["t"] < m["first"]["start"]
+            if morning_step and st["head"].startswith("Umsteigen") and not boarded(today, first_dep(m["best"])):
+                continue  # not on the train, nothing to wake up for
+            if st["head"].startswith("Raus aus der Klasse") and any(e == "school_leave" for _, e in events(today)):
+                mark(k)
+                continue  # already out
         if due <= now < st["t"] + dt.timedelta(minutes=3) and not s.get(k):
             body = [st["detail"]] if st["detail"] else []
             if i + 1 < len(steps):
@@ -1103,8 +1178,8 @@ class Handler(BaseHTTPRequestHandler):
                     text += "\n\n" + afternoon_text(afternoon(d))
                 return self.reply(200, text)
             if u.path == "/day/event":
-                e = q.get("e", "")[:20]
-                mark(dt.date.today().isoformat() + ":event:" + e, dt.datetime.now().strftime("%H:%M"))
+                record(q.get("e", "?").lower())
+                threading.Thread(target=lambda: watch_morning(dt.datetime.now().replace(microsecond=0)), daemon=True).start()
                 return self.reply(200, "ok")
         except Exception as e:
             return self.reply(500, "PRISMO: %s" % e)
