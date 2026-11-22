@@ -365,12 +365,13 @@ def ping_ms(host):
 
 def speedtest():
     t = time.time()
-    with urllib.request.urlopen("https://speed.cloudflare.com/__down?bytes=10000000", timeout=60) as r:
+    ua = {"User-Agent": "Mozilla/5.0 (PRISMO)"}
+    with urllib.request.urlopen(urllib.request.Request("https://speed.cloudflare.com/__down?bytes=10000000", headers=ua), timeout=60) as r:
         n = len(r.read())
     down = n * 8 / (time.time() - t) / 1e6
     data = os.urandom(2000000)
     t = time.time()
-    req = urllib.request.Request("https://speed.cloudflare.com/__up", data=data, method="POST")
+    req = urllib.request.Request("https://speed.cloudflare.com/__up", data=data, method="POST", headers=ua)
     urllib.request.urlopen(req, timeout=60).read()
     up = len(data) * 8 / (time.time() - t) / 1e6
     return round(down, 1), round(up, 1)
@@ -380,6 +381,8 @@ def netwatch():
     net = load(NET, {}) or {}
     net.setdefault("speeds", [])
     net.setdefault("outages", [])
+    net["speeds"] = [x for x in net["speeds"] if x[1] > 0]
+    retry = 0
     while True:
         now = time.time()
         p = ping_ms("1.1.1.1") or ping_ms("8.8.8.8")
@@ -392,13 +395,14 @@ def netwatch():
                 net["outages"] = (net["outages"] + [[net["down_since"], now]])[-50:]
             net["down_since"], changed = None, True
         last = net["speeds"][-1][0] if net["speeds"] else 0
-        if p is not None and now - last > 3 * 3600:
+        if p is not None and now - last > 3 * 3600 and now > retry:
             try:
                 down, up = speedtest()
                 net["speeds"] = [s for s in net["speeds"] if now - s[0] < 7 * 86400] + [[now, down, up, p]]
-            except Exception:
-                net["speeds"] = net["speeds"] + [[now, 0, 0, p]]
-            changed = True
+                changed = True
+            except Exception as e:
+                print("speedtest: %s" % e, flush=True)
+                retry = now + 900
         if changed:
             with open(NET + ".tmp", "w") as f:
                 json.dump(net, f)
