@@ -798,6 +798,9 @@ def dist(a, b):
 
 
 def home_coords():
+    h = cfg().get("home")
+    if h:
+        return tuple(h)
     pc = load(os.path.join(P, "config.json"), {})
     return (pc["lat"], pc["lon"]) if "lat" in pc else None
 
@@ -812,7 +815,7 @@ PLACES = {"bf": (47.94919, 14.354982, 150), "schulen": (47.946304, 14.358964, 10
 
 def places_answer():
     out = {k: {"lat": v[0], "lon": v[1], "r": v[2]} for k, v in PLACES.items()}
-    h = home_coords()
+    h = cfg().get("home") or home_coords()  # day.json has the exact house, config.json only the rough area
     if h:
         out["home"] = {"lat": h[0], "lon": h[1], "r": 120}
     return out
