@@ -38,6 +38,22 @@ enum API {
         }
     }
 
+    struct Day: Decodable, Identifiable, Hashable {
+        let date: String; let label: String; let first: String; let last: String; let changed: Bool; let free: Bool
+        var id: String { date }
+    }
+    static func days() async -> [Day] {
+        (try? JSONDecoder().decode([Day].self, from: try await get("/day/days"))) ?? []
+    }
+
+    static func day(_ date: String) async -> String {
+        do {
+            return String(data: try await get("/day/now", ["date": date], timeout: 40), encoding: .utf8) ?? ""
+        } catch {
+            return "PRISMO antwortet nicht 💤\n\(error.localizedDescription)"
+        }
+    }
+
     static func event(_ name: String) async {
         _ = try? await get("/day/event", ["e": name], timeout: 20)
     }

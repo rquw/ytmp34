@@ -11,9 +11,14 @@ struct PrismoApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Home()
-                .preferredColorScheme(.dark)
-                .onAppear { Tracker.shared.start() }
+            TabView {
+                Tab("Planer", systemImage: "figure.walk.departure") { PlannerView() }
+                Tab("Stundenplan", systemImage: "calendar") { TimetableView() }
+                Tab("Status", systemImage: "cpu") { StatusView() }
+            }
+            .tint(.purple)
+            .preferredColorScheme(.dark)
+            .onAppear { Tracker.shared.start() }
         }
         .onChange(of: phase) { _, p in
             if p == .active { Task { await Alarms.refresh() } }
@@ -21,73 +26,85 @@ struct PrismoApp: App {
     }
 }
 
-struct Home: View {
+// --- shared bits ---
+
+struct TitleBar: View {
+    let title: String
     @ObservedObject private var tracker = Tracker.shared
+    var alarms: [String: String] = Alarms.scheduled
+
+    var body: some View {
+        HStack {
+            Text(title).font(.system(size: 15, weight: .heavy, design: .monospaced)).tracking(3)
+            Spacer()
+            if let next = alarms.keys.sorted().first, let t = alarms[next] {
+                Label(t, systemImage: "alarm.fill").font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Image(systemName: tracker.auth == .authorizedAlways ? "location.fill" : "location.slash.fill")
+                .foregroundStyle(tracker.auth == .authorizedAlways ? Color.green : Color.orange)
+                .font(.system(size: 13))
+        }
+        .padding(.horizontal, 20).padding(.top, 8)
+    }
+}
+
+struct TextCard: View {
+    let text: String
+    let loading: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if loading && text.isEmpty {
+                ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
+            }
+            ForEach(Array(text.components(separatedBy: "\n").enumerated()), id: \.offset) { i, line in
+                Text(line)
+                    .font(i == 0 ? .system(size: 24, weight: .bold) : .system(size: 17))
+                    .foregroundStyle(i == 0 ? .white : (line.hasPrefix("danach") || line.hasPrefix(" ") ? .secondary : .white.opacity(0.85)))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(20)
+        .opacity(loading ? 0.5 : 1)
+    }
+}
+
+// --- planner: what now, trains, home, tomorrow ---
+
+struct PlannerView: View {
     @State private var text = ""
     @State private var mode = "jetzt"
     @State private var loading = false
     @State private var alarms = Alarms.scheduled
 
     private let modes: [(String, String)] = [
-        ("jetzt", "arrow.right.circle.fill"), ("zuege", "tram.fill"), ("heim", "house.fill"),
-        ("heute", "calendar"), ("morgen", "moon.stars.fill"),
+        ("jetzt", "arrow.right.circle.fill"), ("zuege", "tram.fill"), ("heim", "house.fill"), ("morgen", "moon.stars.fill"),
     ]
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("PRISMO").font(.system(size: 15, weight: .heavy, design: .monospaced)).tracking(3)
-                Spacer()
-                status
-            }
-            .padding(.horizontal, 20).padding(.top, 8)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    let lines = text.components(separatedBy: "\n")
-                    if loading && text.isEmpty {
-                        ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
-                    }
-                    ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
-                        Text(line)
-                            .font(i == 0 ? .system(size: 26, weight: .bold) : .system(size: 18, weight: .regular))
-                            .foregroundStyle(i == 0 ? .white : (line.hasPrefix("danach") ? .secondary : .white.opacity(0.85)))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .padding(20)
-                .opacity(loading ? 0.5 : 1)
-            }
-            .refreshable { await load() }
-
-            HStack(spacing: 0) {
+            TitleBar(title: "PLANER", alarms: alarms)
+            HStack(spacing: 8) {
                 ForEach(modes, id: \.0) { m in
                     Button {
                         mode = m.0
                         Task { await load() }
                     } label: {
                         Image(systemName: m.1)
-                            .font(.system(size: 24, weight: .semibold))
-                            .frame(maxWidth: .infinity, minHeight: 64)
-                            .foregroundStyle(mode == m.0 ? Color.purple : Color.white.opacity(0.55))
+                            .font(.system(size: 22, weight: .semibold))
+                            .frame(maxWidth: .infinity, minHeight: 50)
+                            .background(RoundedRectangle(cornerRadius: 14)
+                                .fill(mode == m.0 ? Color.purple.opacity(0.55) : Color.white.opacity(0.07)))
+                            .foregroundStyle(.white)
                     }
                 }
             }
-            .background(.ultraThinMaterial)
+            .padding(.horizontal, 20).padding(.vertical, 12)
+            ScrollView { TextCard(text: text, loading: loading) }
+                .refreshable { await load() }
         }
         .task { await load() }
-    }
-
-    private var status: some View {
-        HStack(spacing: 10) {
-            if let next = alarms.keys.sorted().first, let t = alarms[next] {
-                Label(t, systemImage: "alarm.fill").font(.system(size: 13, weight: .semibold, design: .monospaced))
-            }
-            Image(systemName: tracker.auth == .authorizedAlways ? "location.fill" : "location.slash.fill")
-                .foregroundStyle(tracker.auth == .authorizedAlways ? Color.green : Color.orange)
-                .font(.system(size: 13))
-        }
-        .foregroundStyle(.secondary)
     }
 
     private func load() async {
@@ -95,6 +112,65 @@ struct Home: View {
         let loc = await Tracker.shared.currentLocation()
         text = await API.ask(mode, loc)
         alarms = Alarms.scheduled
+        loading = false
+    }
+}
+
+// --- timetable: every day untis knows, with the plan for it ---
+
+struct TimetableView: View {
+    @State private var days: [API.Day] = []
+    @State private var picked = ""
+    @State private var text = ""
+    @State private var loading = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TitleBar(title: "STUNDENPLAN")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(days) { d in
+                        Button {
+                            picked = d.date
+                            Task { await load() }
+                        } label: {
+                            VStack(spacing: 3) {
+                                Text(d.label).font(.system(size: 15, weight: .bold))
+                                Text(d.free ? "frei" : d.first).font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(d.first != "07:45" && !d.free ? Color.green : Color.secondary)
+                            }
+                            .frame(width: 62, height: 54)
+                            .background(RoundedRectangle(cornerRadius: 12)
+                                .fill(picked == d.date ? Color.purple.opacity(0.55) : Color.white.opacity(0.07)))
+                            .overlay(alignment: .topTrailing) {
+                                if d.changed { Circle().fill(Color.orange).frame(width: 8, height: 8).padding(6) }
+                            }
+                            .foregroundStyle(.white)
+                        }
+                    }
+                }
+                .padding(.horizontal, 20).padding(.vertical, 10)
+            }
+            ScrollView { TextCard(text: text, loading: loading) }
+                .refreshable {
+                    days = await API.days()
+                    await load()
+                }
+        }
+        .task {
+            if days.isEmpty { days = await API.days() }
+            if picked.isEmpty { picked = days.first(where: { !$0.free })?.date ?? days.first?.date ?? "" }
+            await load()
+        }
+    }
+
+    private func load() async {
+        guard !picked.isEmpty else {
+            text = "Untis hat noch keine Tage"
+            return
+        }
+        loading = true
+        text = await API.day(picked)
         loading = false
     }
 }

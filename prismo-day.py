@@ -840,7 +840,55 @@ def alarms_answer():
 TERNBERG = (47.9430, 14.3590)
 
 
-def answer(mode, lat=None, lon=None):
+def known_days():
+    """every weekday untis has lessons for, from today on (week A/B is just whatever untis says)"""
+    state = load(os.path.join(UNTIS, "state.json"), {})
+    days = sorted({l["start"][:10] for l in (state.get("lessons") or {}).values()})
+    today = dt.date.today().isoformat()
+    out = []
+    for d in days:
+        if d < today:
+            continue
+        day = dt.date.fromisoformat(d)
+        all_l = untis_lessons_all(day)
+        real = untis_lessons(day)
+        out.append({"date": d, "label": "%s %s" % (DAYS[day.weekday()], day.strftime("%d.")),
+                    "first": hm(real[0]["start"]) if real else "", "last": hm(real[-1]["end"]) if real else "",
+                    "changed": any(l["status"] != "REGULAR" for l in all_l), "free": not real})
+    return out
+
+
+def day_view(d):
+    """one day: the plan in short, then every lesson"""
+    c = cfg()
+    state = load(os.path.join(UNTIS, "state.json"), {})
+    lessons = sorted((l for l in (state.get("lessons") or {}).values() if l["start"].startswith(d.isoformat())),
+                     key=lambda l: l["start"])
+    if not school_day(d):
+        return "%s %s: keine Schule 🎉" % (DAYS[d.weekday()], d.strftime("%d.%m."))
+    lines = [day_summary(d).replace("Heute: ", "").replace("Morgen: ", ""), ""]
+    icons = {"CANCELLED": "❌", "SUBSTITUTION": "🔄", "ROOMSUBSTITUTION": "🚪", "EXAM": "📝", "ADDITIONAL": "➕",
+             "SHIFT": "🔀", "IRREGULAR": "🔄", "EVENT": "📅"}
+    for l in lessons:
+        st = l.get("status", "REGULAR")
+        les = {"start": at(d, l["start"][11:16]), "subject": l["subject"], "rooms": l.get("rooms") or [], "status": st}
+        t = teacher(c, les)
+        short = next((v for k, v in sorted(c.get("short", {}).items(), key=lambda kv: -len(kv[0])) if l["subject"].startswith(k)),
+                     l["subject"].split(" - ")[0][:18])
+        room = (l.get("rooms") or [""])[0]
+        lines.append("%s %s %s%s%s" % (icons.get(st, "▫️"), l["start"][11:16], short, " " + t if t else "",
+                                      " " + room if room and st != "CANCELLED" else ""))
+        if l.get("text") and st != "REGULAR":
+            lines.append("     " + l["text"][:60])
+    return "\n".join(lines)
+
+
+def answer(mode, lat=None, lon=None, date=None):
+    if date:
+        try:
+            return day_view(dt.date.fromisoformat(date))
+        except ValueError:
+            return "Datum versteh ich nicht"
     # the menu texts can be anything, so go by keywords
     mode = (mode or "jetzt").lower()
     today = dt.date.today()
@@ -1206,7 +1254,9 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/day/now":
                 lat, lon = q.get("lat"), q.get("lon")
                 f = lambda v: float(v.replace(",", ".")) if v else None
-                return self.reply(200, answer(q.get("mode"), f(lat), f(lon)))
+                return self.reply(200, answer(q.get("mode"), f(lat), f(lon), q.get("date")))
+            if u.path == "/day/days":
+                return self.reply(200, json.dumps(known_days(), ensure_ascii=False), "application/json")
             if u.path == "/day/places":
                 return self.reply(200, json.dumps(places_answer()), "application/json")
             if u.path == "/day/alarms":

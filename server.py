@@ -648,8 +648,14 @@ class Handler(BaseHTTPRequestHandler):
         self.json(200, out)
 
     def scan_get(self, path, q):
-        if not scan_auth(self.headers.get("X-Scan-Key", "")):
+        if not scan_auth(self.headers.get("X-Scan-Key", "") or q.get("key", "")):
             return self.json(403, {"error": "key"})
+        if path == "/scan/status":
+            out = pie_status()
+            out["history"] = pie_cache["history"]
+            return self.json(200, out)
+        if path == "/scan/led":
+            return self.json(*pie_action({"action": q.get("action", ""), "text": q.get("text", "")}))
         if path == "/scan/wait":
             return self.json(*scan_wait(q))
         if path == "/scan/recent":
