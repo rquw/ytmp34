@@ -606,6 +606,8 @@ class Handler(BaseHTTPRequestHandler):
         self.direct = q.get("direct") == "1"
         if u.path.startswith("/scan/"):
             return self.scan_get(u.path, q)
+        if u.path.startswith("/day/"):
+            return self.day_get()
         if u.path == "/ping":
             return self.json(200, {"ok": True, "yt_dlp": yt_dlp.version.__version__, **stats(q.get("v", "")[:32], q.get("a") == "1")})
         if u.path not in ("/info", "/dl"):
@@ -662,6 +664,28 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return self.wfile.write(data)
         self.json(404, {"error": "not found"})
+
+    def day_get(self):
+        # the phone (action button, alarm shortcut) asks prismo's day planner, through here
+        if not scan_auth(self.headers.get("X-Scan-Key", "") or dict(urllib.parse.parse_qsl(urllib.parse.urlparse(self.path).query)).get("key", "")):
+            return self.json(403, {"error": "key"})
+        if not PI_STATUS:
+            return self.json(503, {"error": "kein Pi"})
+        path = urllib.parse.urlparse(self.path)
+        q = urllib.parse.urlencode([(k, v) for k, v in urllib.parse.parse_qsl(path.query) if k != "key"])
+        url = PI_STATUS.rsplit(":", 1)[0] + ":8781" + path.path + ("?" + q if q else "")
+        try:
+            with urllib.request.urlopen(url, timeout=40) as r:
+                data, kind, code = r.read(), r.headers.get("Content-Type", "text/plain"), r.status
+        except urllib.error.HTTPError as e:
+            data, kind, code = e.read(), "text/plain; charset=utf-8", e.code
+        except Exception:
+            data, kind, code = "PRISMO antwortet nicht 💤".encode(), "text/plain; charset=utf-8", 504
+        self.send_response(code)
+        self.send_header("Content-Type", kind)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def lookup(self, url, fmt):
         try:
@@ -761,8 +785,8 @@ class Handler(BaseHTTPRequestHandler):
             shutil.rmtree(workdir, ignore_errors=True)
 
     def log_message(self, fmt, *args):
-        if self.path.startswith("/scan/"):
-            return  # long-polls every 25 s would flood the log
+        if self.path.startswith(("/scan/", "/day/")):
+            return  # long-polls and locations every 25 s would flood the log
         print("%s %s" % (self.ip(), fmt % args))
 
 

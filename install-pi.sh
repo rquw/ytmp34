@@ -200,6 +200,27 @@ sudo systemctl daemon-reload
 sudo systemctl enable -q prismo-scan
 sudo systemctl restart prismo-scan
 
+echo "==> Setting up the day planner (trains, untis, alarm, action button)"
+curl -fsSL "$RAW/prismo-day.py" -o "$HOME/prismo/prismo-day.py"
+# teachers, moods and walking times are personal: they live in ~/prismo/day.json, never in the repo
+sudo tee /etc/systemd/system/prismo-day.service >/dev/null <<UNIT
+[Unit]
+Description=prismo day planner (tailscale only)
+After=tailscaled.service network-online.target
+Wants=tailscaled.service network-online.target
+[Service]
+User=$USER
+ExecStart=/bin/sh -c "exec /usr/bin/python3 $HOME/prismo/prismo-day.py serve --host \$(tailscale ip -4)"
+Nice=5
+Restart=always
+RestartSec=10
+[Install]
+WantedBy=multi-user.target
+UNIT
+sudo systemctl daemon-reload
+sudo systemctl enable -q prismo-day
+sudo systemctl restart prismo-day
+
 for _ in $(seq 30); do curl -fsS "http://127.0.0.1:$PORT/ping" >/dev/null 2>&1 && break; sleep 2; done
 HOST="$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
 echo

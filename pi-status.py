@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HOME = os.path.expanduser("~")
 SERVICES = ["ytmp34", "ytmp34-proxy", "untis-watch.timer", "tailscaled", "ytmp34-update.timer",
-            "prismo-watchdog", "prismo-briefing.timer", "prismo-scan"]
+            "prismo-watchdog", "prismo-briefing.timer", "prismo-scan", "prismo-day"]
 
 
 def read(path, default=""):
