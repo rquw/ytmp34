@@ -487,7 +487,7 @@ def tracking():
 
 def boarded(day, dep):
     # left the station area around departure time = on the train/bus
-    return any(e in ("bf_leave", "schulen_leave") and t >= dep - dt.timedelta(minutes=8) for t, e in events(day))
+    return any(e in ("bf_leave", "schulen_leave", "train_on") and t >= dep - dt.timedelta(minutes=8) for t, e in events(day))
 
 
 def effective_morning(day):
@@ -802,7 +802,38 @@ def home_coords():
     return (pc["lat"], pc["lon"]) if "lat" in pc else None
 
 
-SCHOOL = (48.2988, 14.2967)  # around goethestraße 17
+SCHOOL = (48.2965, 14.2946)  # goethestraße 17
+
+# the circles the iphone app watches (radius in m). home comes from ~/prismo/config.json
+PLACES = {"bf": (47.94919, 14.354982, 150), "schulen": (47.946304, 14.358964, 100),
+          "valentin": (48.178909, 14.522002, 200), "steyr": (48.038426, 14.423453, 200),
+          "hbf": (48.290241, 14.29186, 200), "school": (SCHOOL[0], SCHOOL[1], 120)}
+
+
+def places_answer():
+    out = {k: {"lat": v[0], "lon": v[1], "r": v[2]} for k, v in PLACES.items()}
+    h = home_coords()
+    if h:
+        out["home"] = {"lat": h[0], "lon": h[1], "r": 120}
+    return out
+
+
+def alarms_answer():
+    """alarms for the next school days, so the phone has them even if the app doesn't run for a while"""
+    c = cfg()
+    out = []
+    d = dt.date.today()
+    for _ in range(7):
+        if school_day(d) and untis_fresh():
+            m, _ = plans(d, ttl=1800)
+            if m.get("wake"):
+                out.append({"date": d.isoformat(), "alarm": hm(m["wake"]), "why": describe(c, m["first"])})
+        elif d.weekday() < 5 and not untis_fresh():
+            out.append({"date": d.isoformat(), "alarm": c["normal_wake"], "why": "Untis nicht aktuell"})
+        d += dt.timedelta(days=1)
+    return out
+
+
 TERNBERG = (47.9430, 14.3590)
 
 
@@ -833,6 +864,10 @@ def warm(now):
     for d in {now.date(), next_school_day(now.date())}:
         if d and school_day(d):
             plans(d, ttl=600)
+    for i in range(2, 7):  # the rest of the week for the alarms, less often
+        d = now.date() + dt.timedelta(days=i)
+        if school_day(d):
+            plans(d, ttl=1800)
 
 
 def now_answer(lat=None, lon=None):
@@ -1169,6 +1204,10 @@ class Handler(BaseHTTPRequestHandler):
                 lat, lon = q.get("lat"), q.get("lon")
                 f = lambda v: float(v.replace(",", ".")) if v else None
                 return self.reply(200, answer(q.get("mode"), f(lat), f(lon)))
+            if u.path == "/day/places":
+                return self.reply(200, json.dumps(places_answer()), "application/json")
+            if u.path == "/day/alarms":
+                return self.reply(200, json.dumps(alarms_answer(), ensure_ascii=False), "application/json")
             if u.path == "/day/alarm":
                 return self.reply(200, json.dumps(alarm_answer(), ensure_ascii=False), "application/json")
             if u.path == "/day/plan":
