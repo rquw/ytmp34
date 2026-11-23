@@ -54,6 +54,11 @@ enum API {
         }
     }
 
+    static func loc(_ l: CLLocation) async {
+        _ = try? await get("/day/event", ["e": "loc", "lat": String(l.coordinate.latitude),
+                                          "lon": String(l.coordinate.longitude)], timeout: 20)
+    }
+
     static func event(_ name: String) async {
         _ = try? await get("/day/event", ["e": name], timeout: 20)
     }

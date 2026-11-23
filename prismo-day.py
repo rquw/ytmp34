@@ -491,9 +491,53 @@ def tracking():
     return bool(state().get("ev_ever"))
 
 
+WAY = ("bf_leave", "schulen_leave", "train_on", "valentin_arrive", "valentin_leave", "steyr_arrive", "steyr_leave")
+THERE = ("hbf_arrive", "hbf_leave", "school_arrive")
+
+
+def record_loc(lat, lon):
+    # the phone says where it is (button presses, moving around in the morning). kept per day
+    if lat is None or lon is None:
+        return
+    now = dt.datetime.now().replace(microsecond=0)
+    key = now.date().isoformat() + ":loc"
+    mark(key, (state().get(key, []) + [[now.isoformat(), round(lat, 5), round(lon, 5)]])[-200:])
+
+
+def locs(day):
+    return [(dt.datetime.fromisoformat(t), (la, lo)) for t, la, lo in state().get(day.isoformat() + ":loc", [])]
+
+
+def progress(day, since=None):
+    """how far along the way to school he really is, only from what the phone reported:
+    'school', 'linz', 'way' (out of ternberg / on a train) or None (no proof he left)"""
+    since = since or dt.datetime.combine(day, dt.time(0))
+    ev = [e for t, e in events(day) if t >= since]
+    pts = [p for t, p in locs(day) if t >= since]
+    if "school_arrive" in ev or any(dist(p, SCHOOL) < 300 for p in pts):
+        return "school"
+    if any(e in THERE for e in ev) or any(dist(p, LINZ) < 6000 for p in pts):
+        return "linz"
+    if any(e in WAY for e in ev) or any(dist(p, TERNBERG) > 3000 for p in pts):
+        return "way"
+    return None
+
+
+def still_here(day, dep, stop):
+    # proof he did NOT get on: after it left, the phone was still at that stop or at home
+    pts = [p for t, p in locs(day) if t >= dep + dt.timedelta(minutes=1)]
+    near = [PLACES[stop][:2]] + ([home_coords()] if home_coords() else [])
+    if pts:
+        return any(dist(pts[-1], n) < 400 for n in near)
+    ev = [e for t, e in events(day)]
+    last = ev[-1] if ev else None
+    # no location after departure: only the last checkpoint counts. home or standing at the stop = still here
+    return last in ("home_arrive", stop + "_arrive") or not any(e == "home_leave" for e in ev)
+
+
 def boarded(day, dep):
-    # left the station area around departure time = on the train/bus
-    return any(e in ("bf_leave", "schulen_leave", "train_on") and t >= dep - dt.timedelta(minutes=8) for t, e in events(day))
+    # made it onto something (or got driven further): any proof of being past ternberg after it left
+    return progress(day, dep - dt.timedelta(minutes=8)) is not None
 
 
 def effective_morning(day):
@@ -572,6 +616,10 @@ def timeline(day, ttl=60):
         steps.append({"t": o["leave"], "icon": "🔔", "head": "Raus aus der Klasse", "detail": detail, "push": True, "lead": 5})
         steps += ride_steps(o["conn"], pushes=False)
         steps.append({"t": o["conn"]["exp"], "icon": "🏠", "head": "Ternberg an", "detail": "", "push": False})
+    if m.get("best") and progress(day) is not None:
+        # on the way already: the planned wake/leave/ride steps are history, whatever the plan said
+        first = m["first"]["start"]
+        steps = [s for s in steps if s["t"] >= first]
     steps.sort(key=lambda s: s["t"])
     return steps
 
@@ -581,8 +629,19 @@ def in_min(t, now):
     return "jetzt" if n <= 0 else "in %d min" % n if n < 90 else "um %s" % hm(t)
 
 
-def next_step(now):
+def next_step(now, here=None):
     today = now.date()
+    if here and school_day(today):
+        record_loc(*here)
+        m, _ = plans(today, ttl=900)
+        first = (m.get("first") or {}).get("start")
+        stage = progress(today)
+        if first and now < first + dt.timedelta(minutes=30):
+            if stage == "linz" and dist(here, SCHOOL) >= 300:
+                t = linz_answer() if dist(here, LINZ_HBF) < 400 else ""
+                return t or "Zur Schule\n" + route_list(here, SCHOOL, "Schule", n=3)
+            if stage == "way":
+                return "Nach Linz\n" + route_list(here, "hbf", "Linz Hbf", n=3)
     steps = timeline(today, ttl=900) if school_day(today) else []
     nxt = [s for s in steps if s["t"] > now]
     if not nxt:
@@ -893,6 +952,8 @@ def alarms_answer():
 
 
 TERNBERG = (47.9430, 14.3590)
+LINZ = (48.30, 14.29)
+LINZ_HBF = (48.290241, 14.29186)
 
 
 def known_days():
@@ -964,7 +1025,8 @@ def answer(mode, lat=None, lon=None, date=None):
             d = next_school_day(today)
             return "Heute keine Schule 🎉" + ("\n\nNächster Schultag:\n" + day_summary(d) if d else "")
         return day_summary(today) + "\n\n" + home_plan()
-    return next_step(dt.datetime.now().replace(second=0, microsecond=0))
+    here = (lat, lon) if lat is not None else None
+    return next_step(dt.datetime.now().replace(second=0, microsecond=0), here)
 
 
 def warm(now):
@@ -1118,10 +1180,12 @@ def watch_morning(now):
         if p["wake"] > now:
             mark(k + ":wake", hm(p["wake"]))
 
-    # missed it? still home or still on the platform after it left
+    if progress(today) is not None:
+        return  # he's on the way or there: nothing left to warn about this morning
+    # missed it? only with proof he's still home or still on the platform after it left
     dep = first_dep(b)
     if tracking() and dep + dt.timedelta(minutes=3) <= now < p["first"]["start"] and not boarded(today, dep) \
-            and not s.get(k + ":missed:" + sig):
+            and still_here(today, dep, b["stop"]) and not s.get(k + ":missed:" + sig):
         mark(k + ":missed:" + sig)
         if not any(e == "home_leave" for _, e in events(today)):
             # never left the house: sick or no school for him today. say it once, then shut up
@@ -1329,7 +1393,11 @@ class Handler(BaseHTTPRequestHandler):
                     text += "\n\n" + afternoon_text(afternoon(d))
                 return self.reply(200, text)
             if u.path == "/day/event":
-                record(q.get("e", "?").lower())
+                if q.get("e") == "loc":
+                    f = lambda v: float(v.replace(",", "."))
+                    record_loc(f(q["lat"]), f(q["lon"]))
+                else:
+                    record(q.get("e", "?").lower())
                 threading.Thread(target=lambda: watch_morning(dt.datetime.now().replace(microsecond=0)), daemon=True).start()
                 return self.reply(200, "ok")
         except Exception as e:

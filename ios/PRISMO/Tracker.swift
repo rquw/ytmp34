@@ -17,6 +17,7 @@ final class Tracker: NSObject, CLLocationManagerDelegate, ObservableObject {
     private var reported = false
     private var activity: CLBackgroundActivitySession?
     private var oneShot: [CheckedContinuation<CLLocation?, Never>] = []
+    private var lastPing = Date.distantPast
 
     override init() {
         super.init()
@@ -35,6 +36,19 @@ final class Tracker: NSObject, CLLocationManagerDelegate, ObservableObject {
         }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
         Task { await setupRegions() }
+        // cell-tower level updates every ~500 m of movement: nearly free, and PRISMO knows you're on the way
+        // even when no station circle fires (driven somewhere else, quick drop-off)
+        lm.startMonitoringSignificantLocationChanges()
+    }
+
+    // mornings on school days only: where the phone is, at most every 90 s
+    private func ping(_ l: CLLocation) {
+        let c = Calendar.current
+        let h = c.component(.hour, from: Date())
+        guard !c.isDateInWeekend(Date()), h >= 5, h < 10, Date().timeIntervalSince(lastPing) > 90,
+              l.horizontalAccuracy < 1500 else { return }
+        lastPing = Date()
+        Task { await API.loc(l) }
     }
 
     func setupRegions() async {
@@ -92,6 +106,7 @@ final class Tracker: NSObject, CLLocationManagerDelegate, ObservableObject {
             oneShot = []
             waiting.forEach { $0.resume(returning: l) }
         }
+        if let l = locations.last { ping(l) }
         guard Date() < boostUntil else {
             if activity != nil { stopBoost() }
             return
